@@ -247,6 +247,12 @@ pub fn reindex(core: S<'_>, ids: Option<Vec<i64>>) -> Result<usize> {
     ingest::reindex(&core, ids.filter(|v| !v.is_empty()))
 }
 
+/// AI 解读(强制调用模型生成摘要/标签/实体)
+#[tauri::command]
+pub fn reindex_ai(core: S<'_>, ids: Vec<i64>) -> Result<usize> {
+    ingest::reindex_ai(&core, ids)
+}
+
 /// 重试失败任务
 #[tauri::command]
 pub fn retry_failed(core: S<'_>, ids: Option<Vec<i64>>) -> Result<usize> {

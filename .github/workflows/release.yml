@@ -25,7 +25,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +75,6 @@ jobs:
           cat release-notes.md
 
       - name: 创建草稿 Release
-        id: draft
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -85,13 +83,9 @@ jobs:
           PRE=""
           [[ "$TAG" == *-* ]] && PRE="--prerelease"
           # 重跑时复用已有草稿
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft $PRE --title "MemFlow $TAG" --notes-file release-notes.md
-          else
-            gh release edit "$TAG" --draft --notes-file release-notes.md
-          fi
-          ID="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq .id 2>/dev/null || gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)"
-          echo "release_id=${ID}" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2086
+          gh release create "$TAG" --draft $PRE --title "MemFlow $TAG" --notes-file release-notes.md \
+            || gh release edit "$TAG" --draft --title "MemFlow $TAG" --notes-file release-notes.md
 
       - uses: actions/upload-artifact@v4
         if: github.ref_type == 'tag'
@@ -147,7 +141,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseDraft: true
           args: --target ${{ matrix.target }} --bundles dmg
 
       - name: 构建 (手动触发,仅产出构建物)

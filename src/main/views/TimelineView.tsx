@@ -8,6 +8,7 @@ import { useApp } from "../../lib/store";
 import type { Item, TagCount } from "../../lib/types";
 import { CloseIcon, SearchIcon } from "../components/icons";
 import { ItemCard } from "../components/ItemCard";
+import { filterTags, foldTags } from "../../lib/tagFold";
 
 const PAGE = 40;
 
@@ -22,6 +23,8 @@ export function TimelineView() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 250);
@@ -48,9 +51,10 @@ export function TimelineView() {
 
   const groups = groupBy(items, (i) => fmtDayLabel(i.createdAt));
   const failed = status?.queue.failed ?? 0;
+  const folded = foldTags(tags, tag, 7);
 
   const chip = (active: boolean) =>
-    `rounded-full px-3 py-1 text-xs ${active ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-soft)] text-[var(--fg-dim)] hover:text-[var(--fg)]"}`;
+    `rounded-full px-3 py-1 text-xs ${active ? "bg-[var(--accent)] text-[var(--on-accent)]" : "bg-[var(--bg-soft)] text-[var(--fg-dim)] hover:text-[var(--fg)]"}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -75,14 +79,38 @@ export function TimelineView() {
         <button className={chip(kind === "image")} onClick={() => setKind("image")}>图片</button>
         <span className="mx-1 h-4 w-px bg-[var(--line)]" />
         {tag && (
-          <button className="flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-xs text-white" onClick={() => setTag(null)}>#{tag}<CloseIcon size={11} /></button>
+          <button className="flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-xs text-[var(--on-accent)]" onClick={() => setTag(null)}>#{tag}<CloseIcon size={11} /></button>
         )}
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-          {tags.filter((t) => t.tag !== tag).slice(0, 14).map((t) => (
-            <button key={t.tag} className="shrink-0 rounded-full border border-[var(--line)] px-2.5 py-1 text-xs text-[var(--fg-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]" onClick={() => setTag(t.tag)}>
+        <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {folded.visible.map((t) => (
+            <button key={t.tag} className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs text-[var(--fg-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]" onClick={() => setTag(t.tag)}>
               #{t.tag} <span className="text-[var(--fg-faint)]">{t.count}</span>
             </button>
           ))}
+          {folded.rest.length > 0 && (
+            <button className="rounded-full border border-dashed border-[var(--line)] px-2.5 py-1 text-xs text-[var(--fg-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]" onClick={() => setMoreOpen((v) => !v)}>
+              更多标签 {folded.rest.length}
+            </button>
+          )}
+          {moreOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setMoreOpen(false)} />
+              <div className="pop-in absolute left-0 top-full z-30 mt-2 w-[420px] max-w-full rounded-xl border border-[var(--line)] bg-[var(--bg-elev)] p-3 shadow-xl">
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--bg-soft)] px-2.5 py-1.5">
+                  <SearchIcon size={13} className="text-[var(--fg-faint)]" />
+                  <input autoFocus className="w-full bg-transparent text-[13px] outline-none" placeholder="搜索标签" value={tagQuery} onChange={(e) => setTagQuery(e.target.value)} />
+                </div>
+                <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto">
+                  {filterTags([...folded.visible, ...folded.rest], tagQuery).map((t) => (
+                    <button key={t.tag} className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs text-[var(--fg-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]" onClick={() => { setTag(t.tag); setMoreOpen(false); setTagQuery(""); }}>
+                      #{t.tag} <span className="text-[var(--fg-faint)]">{t.count}</span>
+                    </button>
+                  ))}
+                  {filterTags([...folded.visible, ...folded.rest], tagQuery).length === 0 && <span className="text-xs text-[var(--fg-dim)]">没有匹配的标签</span>}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

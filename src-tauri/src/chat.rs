@@ -317,7 +317,7 @@ pub async fn ask(
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut messages = vec![ChatMessage::new(
         "system",
-        prompts::chat_system_prompt(&today, &context),
+        prompts::chat_system_prompt(&today, &context, prompts::wants_diagram(q)),
     )];
     messages.extend(history);
     messages.push(ChatMessage::new("user", q));

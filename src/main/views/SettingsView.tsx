@@ -66,7 +66,7 @@ export function SettingsView() {
       <div data-tauri-drag-region className="flex h-[52px] shrink-0 items-center px-8">
         <h2 className="text-[15px] font-semibold" data-tauri-drag-region>设置</h2>
         <div className="flex-1" data-tauri-drag-region />
-        <button className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40" disabled={!dirty || saving} onClick={() => void save()}>
+        <button className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-medium text-[var(--on-accent)] disabled:opacity-40" disabled={!dirty || saving} onClick={() => void save()}>
           {saving ? "保存中…" : "保存设置"}
         </button>
       </div>
@@ -80,6 +80,9 @@ export function SettingsView() {
               <Row label="文本模型" hint="负责问答、摘要、打标签、流程图,如 qwen2.5:7b。"><input className={inputCls} value={form.textModel} onChange={(e) => set("textModel", e.target.value)} /></Row>
               <Row label="启用视觉解析" hint="图片自动 OCR + 描述 + 标签。需要先下载视觉模型,开启后可对旧图片重刷补齐。">
                 <input type="checkbox" className="h-4 w-4" checked={form.visionEnabled} onChange={(e) => set("visionEnabled", e.target.checked)} />
+              </Row>
+              <Row label="导入文档时自动 AI 解读" hint="默认关闭:文档导入只做分块与向量索引,速度快,检索不受影响。开启后会额外调用文本模型生成摘要/标签(较慢);也可在文档弹窗里按需单独解读。">
+                <input type="checkbox" className="h-4 w-4" checked={form.docAiEnrich} onChange={(e) => set("docAiEnrich", e.target.checked)} />
               </Row>
               <Row label="视觉模型" hint="推荐 minicpm-v(中文 OCR 强)或 qwen2.5vl。"><input className={inputCls} value={form.visionModel} onChange={(e) => set("visionModel", e.target.value)} /></Row>
               <Row label="模型常驻时长" hint="空闲多久后从内存卸载,如 5m、30s、1h、-1(常驻)。"><input className={`${inputCls} w-28`} value={form.keepAlive} onChange={(e) => set("keepAlive", e.target.value)} /></Row>

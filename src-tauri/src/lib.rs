@@ -93,6 +93,7 @@ pub fn run() {
             commands::update_item_content,
             commands::delete_items,
             commands::reindex,
+            commands::reindex_ai,
             commands::retry_failed,
             commands::cancel_item,
             commands::chat_ask,

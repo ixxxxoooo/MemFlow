@@ -305,6 +305,9 @@ pub fn update_content(core: &Arc<Core>, id: i64, content: &str) -> Result<()> {
     if item.kind == "note" && content.is_empty() {
         return Err(AppError::Invalid("笔记内容不能为空".into()));
     }
+    if item.kind == "document" && content.is_empty() {
+        return Err(AppError::Invalid("文档内容不能为空".into()));
+    }
     core.db.with_tx(|tx| {
         repo::update_item_text(tx, id, None, content)?;
         queue::enqueue_item(tx, id, "reindex")?;
@@ -355,11 +358,27 @@ pub async fn delete_items(core: &Arc<Core>, ids: &[i64]) -> Result<usize> {
     Ok(n)
 }
 
-/// 重刷:选中记录或全库
+/// 重刷:选中记录或全库(文档走快速索引,除非设置开启 AI)
 ///
 /// 参数: core 核心;ids 指定记录(None 表示全库)
 /// 返回: 入队数量
 pub fn reindex(core: &Arc<Core>, ids: Option<Vec<i64>>) -> Result<usize> {
+    reindex_with_mode(core, ids, "reindex")
+}
+
+/// AI 解读:对选中记录强制调用模型生成摘要/标签/实体
+///
+/// 参数: core 核心;ids 指定记录(不允许为空)
+/// 返回: 入队数量
+pub fn reindex_ai(core: &Arc<Core>, ids: Vec<i64>) -> Result<usize> {
+    if ids.is_empty() {
+        return Err(AppError::Invalid("未选择记录".into()));
+    }
+    reindex_with_mode(core, Some(ids), "reindex_ai")
+}
+
+/// 按指定模式把记录加入重刷队列
+fn reindex_with_mode(core: &Arc<Core>, ids: Option<Vec<i64>>, mode: &str) -> Result<usize> {
     let n = core.db.with_tx(|tx| {
         let targets: Vec<i64> = match ids {
             Some(v) => v,
@@ -372,7 +391,7 @@ pub fn reindex(core: &Arc<Core>, ids: Option<Vec<i64>>) -> Result<usize> {
         let mut n = 0;
         for id in targets {
             repo::ensure_item_exists(tx, id)?;
-            if queue::enqueue_item(tx, id, "reindex")? {
+            if queue::enqueue_item(tx, id, mode)? {
                 n += 1;
             }
         }

@@ -76,6 +76,34 @@ pub fn clean_meta(mut m: ExtractedMeta) -> ExtractedMeta {
     m
 }
 
+/// 判断任务模式是否要求 AI 解读(ingest_ai / reindex_ai)
+///
+/// 参数: mode 队列任务模式
+/// 返回: 要求 AI 解读返回 true
+pub fn is_ai_mode(mode: &str) -> bool {
+    mode.ends_with("_ai")
+}
+
+/// 本地快速元数据:不调用模型,摘要取正文开头一段有效文字
+///
+/// 参数: text 全文
+/// 返回: 只含摘要的元数据(无标签、无实体)
+pub fn local_meta(text: &str) -> ExtractedMeta {
+    let summary: String = text
+        .lines()
+        .map(|l| l.trim().trim_start_matches('#').trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(120)
+        .collect();
+    ExtractedMeta {
+        summary,
+        ..Default::default()
+    }
+}
+
 /// 构造用于向量化的输入文本
 ///
 /// 参数: item 记录;meta 元数据;piece 切片
@@ -297,15 +325,21 @@ pub async fn process_item(
 
     // ---- 阶段 4:结构化提取 ----
     let tl = time_label(item.created_at);
+    // 文档默认只做快速索引(不调用 LLM);设置开启或任务显式要求 AI 时才解读
+    let use_ai = item.kind != "document" || s.doc_ai_enrich || is_ai_mode(mode);
+    let mut ai_used = false;
     let meta: Option<ExtractedMeta> = if let Some(v) = vision.as_ref() {
+        ai_used = true;
         Some(clean_meta(ExtractedMeta {
             summary: v.description.chars().take(120).collect(),
             category: v.category.clone(),
             tags: v.tags.clone(),
             entities: vec![],
         }))
+    } else if !use_ai {
+        Some(local_meta(&index_text))
     } else {
-        extract_meta(
+        let m = extract_meta(
             core,
             &ollama,
             &index_text,
@@ -313,7 +347,9 @@ pub async fn process_item(
             item.kind == "document",
             token,
         )
-        .await?
+        .await?;
+        ai_used = m.is_some();
+        m
     };
 
     // ---- 阶段 5:分块 ----
@@ -393,13 +429,14 @@ pub async fn process_item(
             .map(|m| m.entities.clone())
             .unwrap_or_default(),
         vision_text: vision_text.clone(),
-        model: meta.as_ref().map(|_| {
-            if vision.is_some() {
-                s.vision_model.clone()
-            } else {
-                s.text_model.clone()
-            }
-        }),
+        // 仅 AI 生成的元数据才记录模型名;本地快速索引为 None
+        model: if !ai_used {
+            None
+        } else if vision.is_some() {
+            Some(s.vision_model.clone())
+        } else {
+            Some(s.text_model.clone())
+        },
         prompt_version: PROMPT_VERSION,
     };
     let chunk_ids = core.db.with_tx(|tx| {
@@ -452,6 +489,21 @@ mod tests {
         assert_eq!(m.tags, vec!["项目A", "预算"]);
         assert_eq!(m.entities, vec!["老王"]);
         assert!(m.category.chars().count() <= 12);
+    }
+
+    #[test]
+    fn 本地元数据只含摘要() {
+        let m = local_meta("# 标题\n\n第一段内容。\n第二段");
+        assert_eq!(m.summary, "标题 第一段内容。 第二段");
+        assert!(m.tags.is_empty() && m.entities.is_empty());
+        let long = "字".repeat(500);
+        assert_eq!(local_meta(&long).summary.chars().count(), 120);
+    }
+
+    #[test]
+    fn ai模式识别() {
+        assert!(is_ai_mode("reindex_ai") && is_ai_mode("ingest_ai"));
+        assert!(!is_ai_mode("reindex") && !is_ai_mode("ingest"));
     }
 
     #[test]

@@ -12,13 +12,13 @@ import { Markdown } from "../components/Markdown";
 
 const SUGGESTIONS = [
   "最近我都记录了哪些事?帮我按时间梳理一下",
-  "把我知识库里关于某个项目的信息整理成流程图",
+  "帮我总结一下知识库里最近的工作进展",
   "我之前记过哪些待办或需要跟进的事情?",
 ];
 
 export function ChatView() {
   const { messages, busy, send, stop, sessions, loadSessions, openSession, newSession, removeSession, sessionId } = useChat();
-  const { openDrawer, status, toast } = useApp();
+  const { openDrawer, openDocModal, status, toast } = useApp();
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -42,7 +42,7 @@ export function ChatView() {
     await send(q);
   };
 
-  const onCite = (s: Source) => openDrawer(s.itemId, s.chunkId);
+  const onCite = (s: Source) => (s.kind === "document" ? openDocModal(s.itemId, s.chunkId) : openDrawer(s.itemId, s.chunkId));
   const empty = messages.length === 0;
 
   return (
@@ -106,14 +106,14 @@ export function ChatView() {
             messages.map((m) =>
               m.role === "user" ? (
                 <div key={m.key} className="pop-in mt-5 flex justify-end">
-                  <div className="selectable max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-[var(--accent)] px-4 py-2.5 text-[14.5px] leading-relaxed text-white">{m.content}</div>
+                  <div className="selectable max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-[var(--bubble)] px-4 py-2.5 text-[14.5px] leading-relaxed text-[var(--fg)]">{m.content}</div>
                 </div>
               ) : (
                 <div key={m.key} className="pop-in mt-5">
-                  {m.content || m.streaming ? (
+                  {m.content ? (
                     <Markdown text={m.content} sources={m.sources} streaming={m.streaming} onCite={onCite} />
                   ) : null}
-                  {m.streaming && !m.content && <div className="text-sm text-[var(--fg-dim)]"><span className="caret">正在检索并思考</span></div>}
+                  {m.streaming && !m.content && <div className="text-sm text-[var(--fg-dim)]">正在检索并思考<span className="typing-dot" /></div>}
                   {m.error && <div className="mt-2 rounded-lg bg-[var(--err)]/10 px-3 py-2 text-[13px] text-[var(--err)]">{m.error}</div>}
                   {m.sources.length > 0 && !m.streaming && (
                     <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11.5px]">
@@ -141,7 +141,7 @@ export function ChatView() {
             rows={1}
             value={input}
             placeholder="向你的知识库提问…(Enter 发送,Shift+Enter 换行)"
-            className="max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-[14.5px] outline-none"
+            className={`max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-[14.5px] outline-none ${busy ? "caret-transparent" : ""}`}
             onChange={(e) => {
               setInput(e.target.value);
               e.target.style.height = "auto";
@@ -157,7 +157,7 @@ export function ChatView() {
           {busy ? (
             <button className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--bg-soft)] hover:bg-[var(--line)]" onClick={() => void stop()} title="停止生成"><StopIcon size={14} /></button>
           ) : (
-            <button className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent)] text-white disabled:opacity-35" disabled={!input.trim()} onClick={() => void submit()}><SendIcon size={16} /></button>
+            <button className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent)] text-[var(--on-accent)] disabled:opacity-35" disabled={!input.trim()} onClick={() => void submit()}><SendIcon size={16} /></button>
           )}
         </div>
       </div>

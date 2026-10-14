@@ -20,7 +20,10 @@ function ensureInit() {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
-    theme: dark ? "dark" : "default",
+    theme: "base",
+    themeVariables: dark
+      ? { background: "#1d1e1f", primaryColor: "#2f3a40", primaryTextColor: "#ecebe8", primaryBorderColor: "#9bb3c0", lineColor: "#aaa7a0", secondaryColor: "#272829", tertiaryColor: "#272829", textColor: "#ecebe8", mainBkg: "#2f3a40", nodeBorder: "#9bb3c0", clusterBkg: "#272829", edgeLabelBackground: "#1d1e1f" }
+      : { background: "#faf9f7", primaryColor: "#e6ecef", primaryTextColor: "#2a2926", primaryBorderColor: "#4a6572", lineColor: "#6b7a82", secondaryColor: "#f1efeb", tertiaryColor: "#f1efeb", textColor: "#2a2926", mainBkg: "#e6ecef", nodeBorder: "#4a6572", clusterBkg: "#f1efeb", edgeLabelBackground: "#faf9f7" },
     htmlLabels: false,
     flowchart: { htmlLabels: false, curve: "basis" },
     fontFamily: '-apple-system, "PingFang SC", sans-serif',
@@ -63,7 +66,7 @@ async function svgToPngBase64(svg: string): Promise<string> {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("无法创建画布");
   const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  ctx.fillStyle = dark ? "#1c1c20" : "#ffffff";
+  ctx.fillStyle = dark ? "#1d1e1f" : "#faf9f7";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/png").split(",")[1];

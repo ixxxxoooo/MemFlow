@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import type { QueueStatus } from "../lib/types";
 import { UploadIcon } from "./components/icons";
+import { DocModal } from "./components/DocModal";
 import { ItemDrawer } from "./components/ItemDrawer";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBanner } from "./components/StatusBanner";
@@ -18,7 +19,7 @@ import { SettingsView } from "./views/SettingsView";
 import { TimelineView } from "./views/TimelineView";
 
 export function App() {
-  const { view, drawer, refreshStatus, setQueue, bumpData, toast, closeDrawer } = useApp();
+  const { view, drawer, refreshStatus, setQueue, bumpData, toast, closeDrawer, closeDocModal } = useApp();
   const [dragging, setDragging] = useState(false);
 
   // 订阅后端事件;定时轮询 Ollama 状态
@@ -64,7 +65,7 @@ export function App() {
   }, [toast, bumpData, refreshStatus]);
 
   // 切换视图时关闭抽屉,避免残留无关详情
-  useEffect(() => { closeDrawer(); }, [view, closeDrawer]);
+  useEffect(() => { closeDrawer(); closeDocModal(); }, [view, closeDrawer, closeDocModal]);
 
   return (
     <div className="flex h-full">
@@ -84,6 +85,7 @@ export function App() {
         )}
       </main>
       {drawer && view !== "settings" && <ItemDrawer />}
+      <DocModal />
       <Toasts />
     </div>
   );

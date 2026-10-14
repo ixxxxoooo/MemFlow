@@ -30,6 +30,8 @@ pub struct Settings {
     pub query_rewrite: bool,
     /// 文本模型上下文长度(所有调用保持一致,避免 Ollama 反复重载模型)
     pub num_ctx: u32,
+    /// 导入文档时是否自动 AI 解读(默认关闭:文档只做快速索引)
+    pub doc_ai_enrich: bool,
 }
 
 impl Default for Settings {
@@ -46,6 +48,7 @@ impl Default for Settings {
             top_k: 8,
             query_rewrite: true,
             num_ctx: 8192,
+            doc_ai_enrich: false,
         }
     }
 }

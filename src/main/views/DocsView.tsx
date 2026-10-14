@@ -8,11 +8,11 @@ import { confirmDialog } from "../../lib/confirm";
 import { fmtDate } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Item } from "../../lib/types";
-import { RefreshIcon, SearchIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { RefreshIcon, SearchIcon, SparkleIcon, TrashIcon, UploadIcon } from "../components/icons";
 import { StatusChip } from "../components/ItemCard";
 
 export function DocsView() {
-  const { dataVersion, drawer, openDrawer, toast, status, refreshStatus, bumpData } = useApp();
+  const { dataVersion, docModal, openDocModal, toast, status, refreshStatus, bumpData } = useApp();
   const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
@@ -79,7 +79,7 @@ export function DocsView() {
           <SearchIcon size={14} className="text-[var(--fg-faint)]" />
           <input className="w-full bg-transparent text-[13px] outline-none" placeholder="搜索文档" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white" onClick={() => void importFiles()}>
+        <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--on-accent)]" onClick={() => void importFiles()}>
           <UploadIcon size={14} />导入文档
         </button>
       </div>
@@ -88,8 +88,11 @@ export function DocsView() {
         {selected.size > 0 ? (
           <>
             <span className="text-[var(--fg-dim)]">已选 {selected.size} 项</span>
-            <button className="flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-2.5 py-1 text-[var(--accent)]" onClick={() => run(() => api.reindex(ids), (n) => `已加入 ${n} 项到重刷队列`)}>
-              <RefreshIcon size={12} />✨ AI 重新解析 / 重刷
+            <button className="flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-2.5 py-1 text-[var(--accent)]" title="重新分块并向量化,不调用 AI,速度快" onClick={() => run(() => api.reindex(ids), (n) => `已加入 ${n} 项到重新索引队列`)}>
+              <RefreshIcon size={12} />重新索引
+            </button>
+            <button className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[var(--fg-dim)] hover:bg-[var(--bg-soft)] hover:text-[var(--fg)]" title="调用文本模型生成摘要、标签与实体,较慢" onClick={() => run(() => api.reindexAi(ids), (n) => `已加入 ${n} 项到 AI 解读队列`)}>
+              <SparkleIcon size={12} />AI 解读
             </button>
             <button className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[var(--err)] hover:bg-[var(--err)]/10" onClick={async () => { if (await confirmDialog(`确定删除选中的 ${selected.size} 个文档吗?`)) { await run(() => api.deleteItems(ids), (n) => `已删除 ${n} 项`); setSelected(new Set()); } }}>
               <TrashIcon size={12} />删除
@@ -98,11 +101,11 @@ export function DocsView() {
           </>
         ) : (
           <>
-            <span className="text-[var(--fg-dim)]">支持 PDF / Markdown / TXT / DOCX,也可直接把文件拖进窗口</span>
+            <span className="text-[var(--fg-dim)]">支持 PDF / Markdown / TXT / DOCX,导入后只做快速索引(不调用 AI),也可直接把文件拖进窗口</span>
             <div className="flex-1" />
             <button
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1 hover:bg-[var(--bg-soft)]"
-              onClick={async () => { if (await confirmDialog("全库重刷会用当前模型与提示词重新解析所有内容(含记录与图片),可能耗时较长,确定继续吗?")) await run(() => api.reindex(null), (n) => `已加入 ${n} 项到重刷队列`); }}
+              onClick={async () => { if (await confirmDialog("全库重刷会重新解析所有内容(笔记与图片会调用 AI,文档只做快速索引),可能耗时较长,确定继续吗?")) await run(() => api.reindex(null), (n) => `已加入 ${n} 项到重刷队列`); }}
             >
               <RefreshIcon size={12} />全库重刷
             </button>
@@ -126,24 +129,24 @@ export function DocsView() {
                   <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(items.map((i) => i.id)))} />
                 </th>
                 <th className="py-2">名称</th>
-                <th className="w-24 py-2">状态</th>
+                <th className="w-28 py-2">状态</th>
                 <th className="w-16 py-2">切片</th>
                 <th className="w-28 py-2 pr-6">导入时间</th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => (
-                <tr key={it.id} onClick={() => openDrawer(it.id)} className={`cursor-default border-t border-[var(--line)] hover:bg-[var(--bg-soft)] ${drawer?.itemId === it.id ? "bg-[var(--accent-soft)]" : ""}`}>
+                <tr key={it.id} onClick={() => openDocModal(it.id)} className={`cursor-default border-t border-[var(--line)] hover:bg-[var(--bg-soft)] ${docModal?.itemId === it.id ? "bg-[var(--accent-soft)]" : ""}`}>
                   <td className="py-2.5 pl-6" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(it.id)} onChange={() => setSelected((p) => { const n = new Set(p); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })} />
                   </td>
                   <td className="py-2.5 pr-3">
                     <div className="font-medium">{it.title ?? it.originalName}</div>
                     {it.summary && <div className="line-clamp-1 text-xs text-[var(--fg-dim)]">{it.summary}</div>}
-                    <div className="mt-1 flex flex-wrap gap-1">{it.tags.slice(0, 4).map((t) => <span key={t} className="rounded-full bg-[var(--accent-soft)] px-1.5 text-[10.5px] text-[var(--accent)]">#{t}</span>)}</div>
+                    <div className="mt-1 flex flex-wrap gap-1">{it.tags.slice(0, 5).map((t) => <span key={t} className="rounded-full bg-[var(--accent-soft)] px-1.5 text-[10.5px] text-[var(--accent)]">#{t}</span>)}</div>
                   </td>
                   <td className="py-2.5">
-                    {it.status === "done" ? <span className="text-[11px] text-[var(--ok)]">已索引</span> : <StatusChip item={it} />}
+                    {it.status === "done" ? <span className="text-[11px] text-[var(--ok)]">{it.metaModel ? "已索引 · AI" : "已索引"}</span> : <StatusChip item={it} />}
                   </td>
                   <td className="py-2.5 text-[var(--fg-dim)]">{it.chunkCount}</td>
                   <td className="py-2.5 pr-6 text-[var(--fg-dim)]">{fmtDate(it.createdAt)}</td>

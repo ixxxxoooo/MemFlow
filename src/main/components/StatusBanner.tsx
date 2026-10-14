@@ -43,7 +43,7 @@ export function StatusBanner() {
   };
 
   const bar = "flex items-center gap-3 border-b border-[var(--line)] px-5 py-2.5 text-[13px]";
-  const primary = "rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-50";
+  const primary = "rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-[var(--on-accent)] disabled:opacity-50";
 
   if (!status.ollamaRunning) {
     return (

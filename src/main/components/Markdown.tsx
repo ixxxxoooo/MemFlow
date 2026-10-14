@@ -33,7 +33,7 @@ export const Markdown = memo(function Markdown({ text, sources = [], streaming, 
           return (
             <button
               type="button"
-              className="mx-0.5 inline-flex h-[18px] min-w-[18px] -translate-y-px items-center justify-center rounded-full bg-[var(--accent-soft)] px-1 align-middle text-[11px] font-semibold text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white"
+              className="mx-0.5 inline-flex h-[18px] min-w-[18px] -translate-y-px items-center justify-center rounded-full bg-[var(--accent-soft)] px-1 align-middle text-[11px] font-semibold text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
               onClick={() => src && onCite?.(src)}
               title={src?.title ?? `来源 ${n}`}
             >
@@ -64,7 +64,7 @@ export const Markdown = memo(function Markdown({ text, sources = [], streaming, 
   );
 
   return (
-    <div className={`md selectable ${streaming ? "caret" : ""}`}>
+    <div className="md selectable">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={components}
@@ -72,6 +72,7 @@ export const Markdown = memo(function Markdown({ text, sources = [], streaming, 
       >
         {content}
       </ReactMarkdown>
+      {streaming && <span className="typing-dot" />}
     </div>
   );
 });

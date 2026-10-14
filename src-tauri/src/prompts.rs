@@ -118,18 +118,36 @@ pub fn vision_messages(caption: &str, image_b64: String) -> Vec<ChatMessage> {
     vec![m]
 }
 
+/// 判断用户是否明确要求以图表形式呈现(流程图、时序图、脑图等)
+///
+/// 参数: question 用户问题
+/// 返回: 明确要图返回 true;其余情况一律只用文字回答
+pub fn wants_diagram(question: &str) -> bool {
+    let q = question.to_lowercase();
+    const KEYS: [&str; 16] = [
+        "流程图", "时序图", "甘特图", "脑图", "思维导图", "架构图", "关系图", "示意图", "图表",
+        "画图", "画个图", "画一个图", "画出", "可视化", "mermaid", "flowchart",
+    ];
+    KEYS.iter().any(|k| q.contains(k))
+}
+
 /// 构造问答系统提示词
 ///
-/// 参数: today 今天日期文案;context 已编号的资料文本
+/// 参数: today 今天日期文案;context 已编号的资料文本;allow_diagram 用户是否明确要图
 /// 返回: 系统提示词
-pub fn chat_system_prompt(today: &str, context: &str) -> String {
+pub fn chat_system_prompt(today: &str, context: &str, allow_diagram: bool) -> String {
+    let diagram_rule = if allow_diagram {
+        "3. 用户明确要求图表,请先给出简短文字说明,再附一个 ```mermaid 代码块(flowchart TD、sequenceDiagram、timeline 等)。\n\
+            Mermaid 规范:节点 ID 只用英文字母和数字;节点文字必须放在双引号里,如 A[\"文字\"];不要在文字中使用英文括号、引号和分号。\n"
+    } else {
+        "3. 只用文字回答(可用列表、表格),不要输出 mermaid 代码块或任何图表。\n"
+    };
     format!(
         "你是用户的个人知识库助手 MemFlow。今天是 {today}。\n\
          严格遵守以下规则:\n\
          1. 只能依据下方「资料」回答。资料中没有的信息,明确说\"记录中没有提到\",绝不编造。\n\
          2. 引用资料时,在对应句末用方括号标注资料编号,例如 [1] 或 [1][3]。只能使用资料里存在的编号。\n\
-         3. 当用户询问流程、架构、因果关系、时间线、对比或关系梳理时,先给出文字回答,再附一个 ```mermaid 代码块(flowchart TD、sequenceDiagram、timeline 等)。\n\
-            Mermaid 规范:节点 ID 只用英文字母和数字;节点文字必须放在双引号里,如 A[\"文字\"];不要在文字中使用英文括号、引号和分号。其他情况不要输出图。\n\
+         {diagram_rule}\
          4. 使用简体中文,条理清晰,简洁准确。\n\
          \n\
          资料:\n{context}"
@@ -164,4 +182,27 @@ pub fn mermaid_fix_messages(code: &str, error: &str) -> Vec<ChatMessage> {
         ),
         ChatMessage::new("user", format!("错误信息:{error}\n\n代码:\n{code}")),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 仅明确要图时才允许出图() {
+        assert!(wants_diagram("把这个项目的流程画成流程图"));
+        assert!(wants_diagram("帮我画个图"));
+        assert!(wants_diagram("用 Mermaid 展示"));
+        assert!(!wants_diagram("最近我都记录了哪些事?"));
+        assert!(!wants_diagram("总结一下项目进展"));
+    }
+
+    #[test]
+    fn 提示词按需包含图表规则() {
+        let on = chat_system_prompt("2026-10-15", "资料", true);
+        let off = chat_system_prompt("2026-10-15", "资料", false);
+        assert!(on.contains("```mermaid") && on.contains("Mermaid 规范"));
+        assert!(off.contains("不要输出 mermaid") && !off.contains("Mermaid 规范"));
+        assert!(off.contains("4. 使用简体中文"));
+    }
 }

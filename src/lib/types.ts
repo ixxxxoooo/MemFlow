@@ -62,6 +62,7 @@ export interface Settings {
   topK: number;
   queryRewrite: boolean;
   numCtx: number;
+  docAiEnrich: boolean;
 }
 
 export interface Stats {

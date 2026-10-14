@@ -2,35 +2,40 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #ffffff;
-  --bg-soft: #f5f5f7;
+  /* 素雅配色:暖灰米白 + 黛青灰蓝,所有文字对比度 ≥ 4:1 */
+  --bg: #faf9f7;
+  --bg-soft: #f1efeb;
   --bg-elev: #ffffff;
-  --fg: #1d1d1f;
-  --fg-dim: #6e6e73;
-  --fg-faint: #a1a1a6;
-  --line: rgba(0, 0, 0, 0.08);
-  --accent: #6c5ce7;
-  --accent-soft: rgba(108, 92, 231, 0.12);
-  --ok: #30b46c;
-  --warn: #f0a020;
-  --err: #e5484d;
-  --sidebar-tint: rgba(246, 246, 248, 0.35);
-  --glass: rgba(255, 255, 255, 0.72);
+  --bubble: #ebe8e2;
+  --fg: #2a2926;
+  --fg-dim: #5f5b55;
+  --fg-faint: #7d7972;
+  --line: rgba(60, 50, 40, 0.12);
+  --accent: #4a6572;
+  --accent-soft: rgba(74, 101, 114, 0.12);
+  --on-accent: #ffffff;
+  --ok: #4f8a68;
+  --warn: #b8862f;
+  --err: #b4524f;
+  --sidebar-tint: rgba(244, 242, 238, 0.45);
+  --glass: rgba(250, 249, 247, 0.84);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1c1c20;
-    --bg-soft: #26262b;
-    --bg-elev: #2b2b31;
-    --fg: #f2f2f4;
-    --fg-dim: #a0a0a8;
-    --fg-faint: #6c6c74;
-    --line: rgba(255, 255, 255, 0.09);
-    --accent: #8f82ff;
-    --accent-soft: rgba(143, 130, 255, 0.16);
-    --sidebar-tint: rgba(30, 30, 36, 0.25);
-    --glass: rgba(40, 40, 48, 0.62);
+    --bg: #1d1e1f;
+    --bg-soft: #272829;
+    --bg-elev: #2c2d2f;
+    --bubble: #34363a;
+    --fg: #ecebe8;
+    --fg-dim: #aaa7a0;
+    --fg-faint: #8b887f;
+    --line: rgba(255, 255, 255, 0.1);
+    --accent: #9bb3c0;
+    --accent-soft: rgba(155, 179, 192, 0.16);
+    --on-accent: #1d1e1f;
+    --sidebar-tint: rgba(32, 33, 35, 0.35);
+    --glass: rgba(40, 41, 43, 0.72);
   }
 }
 
@@ -59,8 +64,8 @@ button { font: inherit; color: inherit; cursor: default; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
 .pop-in { animation: pop-in .22s ease-out; }
 @keyframes fade-out { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes caret { 50% { opacity: 0; } }
-.caret::after { content: "▍"; animation: caret 1s steps(1) infinite; color: var(--accent); margin-left: 1px; }
+/* 流式输出指示:单一、不闪烁的柔和呼吸圆点(不再使用闪烁光标) */
+.typing-dot { display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%; background: var(--accent); vertical-align: middle; animation: breathe 1.6s ease-in-out infinite; }
 
 /* 胶囊拖入文件时的彩色流光边框 */
 @keyframes flow { to { --angle: 360deg; } }
@@ -70,7 +75,7 @@ button { font: inherit; color: inherit; cursor: default; }
 }
 .flow-border::before {
   content: ""; position: absolute; inset: -2px; border-radius: inherit; padding: 2px; pointer-events: none;
-  background: conic-gradient(from var(--angle), #ff6ec7, #7c5cff, #38d0ff, #5bf0a8, #ffd45c, #ff6ec7);
+  background: conic-gradient(from var(--angle), #9bb3c0, #d9d3c7, #b9c4b4, #c9b8a8, #9bb3c0);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
   animation: flow 2.2s linear infinite;
@@ -92,3 +97,32 @@ button { font: inherit; color: inherit; cursor: default; }
 .md th, .md td { border: 1px solid var(--line); padding: 6px 10px; }
 .md blockquote { margin: .6em 0; padding: .1em 1em; border-left: 3px solid var(--accent); color: var(--fg-dim); }
 .md a { color: var(--accent); }
+
+/* Milkdown 所见即所得编辑器:使用本应用的素雅配色覆盖主题变量 */
+.mf-editor .milkdown {
+  --crepe-color-background: var(--bg-elev);
+  --crepe-color-on-background: var(--fg);
+  --crepe-color-surface: var(--bg-soft);
+  --crepe-color-surface-low: var(--bg-soft);
+  --crepe-color-on-surface: var(--fg);
+  --crepe-color-on-surface-variant: var(--fg-dim);
+  --crepe-color-outline: var(--fg-faint);
+  --crepe-color-primary: var(--accent);
+  --crepe-color-secondary: var(--accent-soft);
+  --crepe-color-on-secondary: var(--fg);
+  --crepe-color-inverse: var(--fg);
+  --crepe-color-on-inverse: var(--bg);
+  --crepe-color-inline-code: var(--accent);
+  --crepe-color-error: var(--err);
+  --crepe-color-hover: var(--bg-soft);
+  --crepe-color-selected: var(--accent-soft);
+  --crepe-color-inline-area: var(--bg-soft);
+  --crepe-base-font-size: 15px;
+  --crepe-font-title: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  --crepe-font-default: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --crepe-font-code: "SF Mono", Menlo, monospace;
+  --crepe-shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --crepe-shadow-2: 0 4px 14px rgba(0, 0, 0, 0.14);
+  background: transparent;
+}
+.mf-editor .milkdown .ProseMirror { padding: 8px 4px 40px; outline: none; }

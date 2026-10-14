@@ -45,6 +45,7 @@ export const api = {
   updateItemContent: (id: number, content: string) => call<void>("update_item_content", { id, content }),
   deleteItems: (ids: number[]) => call<number>("delete_items", { ids }),
   reindex: (ids: number[] | null) => call<number>("reindex", { ids }),
+  reindexAi: (ids: number[]) => call<number>("reindex_ai", { ids }),
   retryFailed: (ids: number[] | null) => call<number>("retry_failed", { ids }),
   cancelItem: (id: number) => call<void>("cancel_item", { id }),
   chatAsk: (sessionId: number | null, question: string, onEvent: (e: ChatEvent) => void) => {

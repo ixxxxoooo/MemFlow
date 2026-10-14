@@ -349,6 +349,10 @@ async fn 更换向量模型后旧向量隔离_重刷后恢复() {
 async fn 文档导入_分块并带全局摘要() {
     let (url, _m) = start_mock().await;
     let (core, dir) = new_core(&url);
+    // 开启文档 AI 解读,验证 AI 摘要会挂到每个切片
+    let mut s = core.settings();
+    s.doc_ai_enrich = true;
+    core.update_settings(s).unwrap();
     let doc = dir.path().join("设计文档.md");
     let body = (0..40)
         .map(|i| {
@@ -440,4 +444,45 @@ async fn 删除记录后不再被检索到() {
     .await
     .unwrap();
     assert!(hits.is_empty());
+}
+
+#[tokio::test]
+async fn 文档默认快速索引_不调用模型提取() {
+    let (url, _m) = start_mock().await;
+    let (core, dir) = new_core(&url);
+    let doc = dir.path().join("快速.md");
+    std::fs::write(&doc, "# 缓存方案\n\n本文介绍缓存架构与失效策略。").unwrap();
+    let r = ingest::capture(
+        &core,
+        CaptureInput {
+            text: None,
+            paths: vec![doc.to_string_lossy().into()],
+        },
+    )
+    .await
+    .unwrap();
+    queue::drain_once(&core).await.unwrap();
+    let (item, chunks) = core
+        .db
+        .with(|c| {
+            Ok((
+                repo::get_item(c, r.created[0])?.unwrap(),
+                repo::list_chunks(c, r.created[0])?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(item.status, "done");
+    assert!(!chunks.is_empty());
+    assert!(item.meta_model.is_none(), "快速索引不应记录 AI 模型");
+    assert!(item.summary.as_deref().unwrap_or("").contains("缓存架构"));
+    assert!(item.tags.is_empty());
+
+    // 显式 AI 解读后才记录模型并生成摘要
+    ingest::reindex_ai(&core, vec![r.created[0]]).unwrap();
+    queue::drain_once(&core).await.unwrap();
+    let item = core
+        .db
+        .with(|c| Ok(repo::get_item(c, r.created[0])?.unwrap()))
+        .unwrap();
+    assert!(item.meta_model.is_some(), "AI 解读后应记录模型");
 }

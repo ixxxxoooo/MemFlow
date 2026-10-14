@@ -18,6 +18,8 @@ interface AppState {
   status: AppStatus | null;
   queue: QueueStatus | null;
   drawer: { itemId: number; chunkId?: number } | null;
+  /** 文档弹窗(预览/编辑);chunkId 用于定位被引用的切片 */
+  docModal: { itemId: number; chunkId?: number } | null;
   toasts: ToastItem[];
   /** 数据变化计数,列表视图据此刷新 */
   dataVersion: number;
@@ -27,6 +29,8 @@ interface AppState {
   bumpData: () => void;
   openDrawer: (itemId: number, chunkId?: number) => void;
   closeDrawer: () => void;
+  openDocModal: (itemId: number, chunkId?: number) => void;
+  closeDocModal: () => void;
   toast: (text: string, kind?: ToastItem["kind"]) => void;
 }
 
@@ -37,6 +41,7 @@ export const useApp = create<AppState>((set, get) => ({
   status: null,
   queue: null,
   drawer: null,
+  docModal: null,
   toasts: [],
   dataVersion: 0,
   setView: (view) => set({ view }),
@@ -52,6 +57,8 @@ export const useApp = create<AppState>((set, get) => ({
   bumpData: () => set((s) => ({ dataVersion: s.dataVersion + 1 })),
   openDrawer: (itemId, chunkId) => set({ drawer: { itemId, chunkId } }),
   closeDrawer: () => set({ drawer: null }),
+  openDocModal: (itemId, chunkId) => set({ docModal: { itemId, chunkId } }),
+  closeDocModal: () => set({ docModal: null }),
   toast: (text, kind = "info") => {
     const id = toastSeq++;
     set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }));
