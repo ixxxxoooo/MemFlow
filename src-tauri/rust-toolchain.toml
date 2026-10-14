@@ -1,0 +1,5 @@
+# 固定工具链,保证本地与 CI 的 clippy/rustfmt 行为一致;升级时同步修改此处并跑一遍 CI
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -61,8 +61,11 @@ pub fn encode(v: &[f32]) -> Vec<u8> {
 /// 参数: b 字节序列
 /// 返回: 向量(长度不是 4 的倍数时丢弃尾部)
 pub fn decode(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+    // as_chunks 自动丢弃长度不足 4 的尾部
+    b.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect()
 }
 
