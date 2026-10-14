@@ -1,0 +1,33 @@
+# 更新日志
+
+本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-15
+
+首个公开版本。
+
+### 新增
+
+- **闪念胶囊**:全局快捷键(默认 `Cmd+Shift+K`)唤起的 Spotlight 风格输入窗口,支持文字、粘贴截图、拖入文件;失焦自动收起、草稿保留 5 分钟、提交后轻提示;托盘常驻。
+- **主工作台**:AI 问答 / 记忆时间流 / 知识档案库三栏布局,右侧溯源抽屉,支持浅色与深色。
+- **本地 AI 管线**:基于 Ollama 的 `bge-m3` 向量、`qwen2.5:7b` 文本与可选 `minicpm-v` 视觉模型;结构化提取(摘要、分类、标签、实体),失败自动降级为「原文 + 向量」。
+- **混合检索**:向量 + FTS5(jieba 中文分词)→ RRF 融合 → 时效加权 → 相关度门槛;按嵌入模型隔离向量。
+- **可溯源问答**:无命中拒答、`[n]` 引用校验、查询改写、会话持久化、流式输出与中途停止。
+- **Mermaid 卡片**:语法校验、自动修复、缩放拖拽、查看代码、导出 SVG/PNG。
+- **文档导入**:txt / md / pdf / docx,按标题与段落分块并生成全局摘要。
+- **重刷机制**:单事务替换衍生数据,支持选中或全库,更换向量模型后提示重刷。
+- **健壮性**:原始数据先落盘;持久化任务队列、崩溃恢复、指数退避;Ollama 离线或模型缺失仅重排不耗重试次数;数据库升级前自动备份。
+- **Ollama 管家**:状态检测、一键拉起、应用内模型下载(含进度)。
+- 工程化:GitHub Actions CI 与自动发布 `.dmg`(Apple Silicon / Intel)。
+
+### 已知限制
+
+- 胶囊在其他应用的全屏 Space 上可能不显示。
+- 扫描版 PDF 无 OCR;视觉模型默认关闭。
+- 发布包为 ad-hoc 签名,未经 Apple 公证。
+
+[Unreleased]: https://github.com/ixxxxoooo/MemFlow/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ixxxxoooo/MemFlow/releases/tag/v0.1.0
