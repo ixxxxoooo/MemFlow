@@ -1,0 +1,46 @@
+name: 缺陷报告
+description: 报告一个 Bug
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么?
+      description: 清晰描述问题,以及你期望的行为。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MemFlow 版本
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本与芯片
+      placeholder: macOS 15.1 / Apple M2
+    validations:
+      required: true
+  - type: input
+    id: ollama
+    attributes:
+      label: Ollama 版本与所用模型
+      placeholder: Ollama 0.x / bge-m3 + qwen2.5:7b
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 可从终端运行 `/Applications/MemFlow.app/Contents/MacOS/memflow` 获取日志。
+      render: shell
