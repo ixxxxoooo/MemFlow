@@ -1,0 +1,67 @@
+// @author ygw
+// 前端到 Rust 后端的调用封装(统一错误为 Error 对象)
+
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type {
+  AppStatus, CaptureResult, ChatEvent, ItemDetail, ItemFilter, Item, PullProgress,
+  Session, Settings, StoredMessage, TagCount,
+} from "./types";
+
+/** 调用后端命令,把字符串错误统一包装成 Error */
+async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (e) {
+    throw new Error(typeof e === "string" ? e : (e as Error)?.message ?? String(e));
+  }
+}
+
+export const api = {
+  appStatus: () => call<AppStatus>("app_status"),
+  ollamaStart: () => call<void>("ollama_start"),
+  pullModel: (name: string, onProgress: (p: PullProgress) => void) => {
+    const ch = new Channel<PullProgress>();
+    ch.onmessage = onProgress;
+    return call<void>("pull_model", { name, onProgress: ch });
+  },
+  cancelPull: () => call<void>("cancel_pull"),
+  getSettings: () => call<Settings>("get_settings"),
+  updateSettings: (settings: Settings) => call<void>("update_settings", { settings }),
+  captureSubmit: (text: string | null, paths: string[]) =>
+    call<CaptureResult>("capture_submit", { input: { text, paths } }),
+  /** 把剪贴板里的二进制文件暂存到后端,返回暂存路径 */
+  async stageFile(file: File): Promise<string> {
+    const safe = file.name.replace(/[^A-Za-z0-9._-]/g, "_") || "paste.png";
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<string>("stage_file", bytes, { headers: { "x-filename": safe } });
+    } catch (e) {
+      throw new Error(typeof e === "string" ? e : String(e));
+    }
+  },
+  listItems: (filter: ItemFilter) => call<Item[]>("list_items", { filter }),
+  getItem: (id: number) => call<ItemDetail>("get_item", { id }),
+  listTags: () => call<TagCount[]>("list_tags"),
+  updateItemContent: (id: number, content: string) => call<void>("update_item_content", { id, content }),
+  deleteItems: (ids: number[]) => call<number>("delete_items", { ids }),
+  reindex: (ids: number[] | null) => call<number>("reindex", { ids }),
+  retryFailed: (ids: number[] | null) => call<number>("retry_failed", { ids }),
+  cancelItem: (id: number) => call<void>("cancel_item", { id }),
+  chatAsk: (sessionId: number | null, question: string, onEvent: (e: ChatEvent) => void) => {
+    const ch = new Channel<ChatEvent>();
+    ch.onmessage = onEvent;
+    return call<void>("chat_ask", { sessionId, question, onEvent: ch });
+  },
+  chatCancel: () => call<void>("chat_cancel"),
+  listSessions: () => call<Session[]>("list_sessions"),
+  getSessionMessages: (sessionId: number) => call<StoredMessage[]>("get_session_messages", { sessionId }),
+  deleteSession: (sessionId: number) => call<void>("delete_session", { sessionId }),
+  fixMermaid: (code: string, error: string) => call<string>("fix_mermaid", { code, error }),
+  writeExport: (path: string, dataBase64: string) => call<void>("write_export", { path, dataBase64 }),
+  exportBackup: (destDir: string) => call<string>("export_backup", { destDir }),
+  showMain: () => call<void>("show_main"),
+  showCapsule: () => call<void>("show_capsule"),
+  hideCapsule: () => call<void>("hide_capsule"),
+  resizeCapsule: (height: number) => call<void>("resize_capsule", { height }),
+  notifyToast: (message: string) => call<void>("notify_toast", { message }),
+};

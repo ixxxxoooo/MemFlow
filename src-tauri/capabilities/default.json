@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口与闪念胶囊的最小权限集合",
+  "windows": [
+    "main",
+    "capsule",
+    "toast"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-focus",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-message"
+  ]
+}

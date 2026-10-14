@@ -1,0 +1,105 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MemFlow",
+  "version": "0.1.0",
+  "identifier": "com.ygw.memflow",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "MemFlow",
+        "url": "index.html",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 560,
+        "center": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 20
+        }
+      },
+      {
+        "label": "capsule",
+        "title": "MemFlow 闪念",
+        "url": "capsule.html",
+        "width": 640,
+        "height": 72,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "shadow": true,
+        "visibleOnAllWorkspaces": true,
+        "focus": true
+      },
+      {
+        "label": "toast",
+        "title": "MemFlow 提示",
+        "url": "toast.html",
+        "width": 260,
+        "height": 52,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visibleOnAllWorkspaces": true,
+        "focus": false,
+        "focusable": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$DATA/MemFlow/attachments/**"
+        ]
+      },
+      "devCsp": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: ipc: http://ipc.localhost asset: http://asset.localhost; img-src * data: blob: asset: http://asset.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "Productivity",
+    "publisher": "ygw",
+    "copyright": "Copyright © 2026 ygw. Released under the MIT License.",
+    "shortDescription": "MemFlow - 本地 AI 第二大脑",
+    "longDescription": "重输入、轻管理的本地 AI 外脑:闪念胶囊随手记录,Ollama 本地理解与检索,回答可溯源。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "dmg": {
+        "windowSize": { "width": 640, "height": 400 },
+        "appPosition": { "x": 180, "y": 190 },
+        "applicationFolderPosition": { "x": 460, "y": 190 }
+      }
+    }
+  }
+}

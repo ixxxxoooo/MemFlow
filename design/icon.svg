@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15103f"/>
+      <stop offset="0.55" stop-color="#2a2b8c"/>
+      <stop offset="1" stop-color="#5b2fa8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.3" r="0.7">
+      <stop offset="0" stop-color="#8f7dff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#8f7dff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe3a3"/>
+      <stop offset="1" stop-color="#ffb347"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6a237"/>
+      <stop offset="1" stop-color="#b9561a"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffbe55"/>
+      <stop offset="1" stop-color="#d9701c"/>
+    </linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+    <clipPath id="clipbg"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g clip-path="url(#clipbg)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+    <ellipse cx="512" cy="835" rx="230" ry="46" fill="#0a0626" opacity="0.55" filter="url(#shadow)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3"/>
+  <!-- 琥珀琉璃立方体 -->
+  <g stroke-linejoin="round">
+    <polygon points="312,445 512,560 512,790 312,675" fill="url(#left)" opacity="0.92"/>
+    <polygon points="512,560 712,445 712,675 512,790" fill="url(#right)" opacity="0.92"/>
+    <polygon points="512,330 712,445 512,560 312,445" fill="url(#top)" opacity="0.95"/>
+    <polyline points="312,445 512,560 712,445" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="5"/>
+    <line x1="512" y1="560" x2="512" y2="790" stroke="#fff" stroke-opacity="0.45" stroke-width="5"/>
+    <polygon points="512,330 712,445 712,675 512,790 312,675 312,445" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="6"/>
+    <polygon points="512,350 640,424 512,498 384,424" fill="#fff" opacity="0.18"/>
+  </g>
+  <!-- 神经网络折线 -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="368,648 440,606 470,688 542,598 588,656 652,540 566,468 512,338 512,262" stroke="#fff" stroke-width="16" opacity="0.7" filter="url(#blur)"/>
+    <polyline points="368,648 440,606 470,688 542,598 588,656 652,540 566,468 512,338 512,262" stroke="#fffdf5" stroke-width="9"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="368" cy="648" r="13"/><circle cx="440" cy="606" r="11"/><circle cx="470" cy="688" r="12"/>
+    <circle cx="542" cy="598" r="11"/><circle cx="588" cy="656" r="12"/><circle cx="652" cy="540" r="13"/>
+    <circle cx="566" cy="468" r="10"/>
+  </g>
+  <!-- 顶部四角星芒 -->
+  <path d="M512 150 Q526 212 590 226 Q526 240 512 304 Q498 240 434 226 Q498 212 512 150 Z" fill="#fff" opacity="0.75" filter="url(#blur)"/>
+  <path d="M512 150 Q526 212 590 226 Q526 240 512 304 Q498 240 434 226 Q498 212 512 150 Z" fill="#fffdf5"/>
+</svg>

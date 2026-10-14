@@ -1,0 +1,252 @@
+// @author ygw
+//! 混合检索:向量相似度 + FTS5 全文(jieba 分词)+ RRF 融合 + 时间衰减。
+//!
+//! 健壮性:
+//! - 向量化失败(Ollama 不可用)时自动降级为纯全文检索
+//! - 同时设置相关性闸门,低相关内容不返回,配合问答"无资料则拒答"防止幻觉
+
+use crate::core::Core;
+use crate::error::Result;
+use crate::tokenizer;
+use rusqlite::params_from_iter;
+use serde::Serialize;
+use std::collections::HashMap;
+
+/// RRF 平滑常数
+const RRF_K: f32 = 60.0;
+/// 每路召回数量
+const RECALL_N: usize = 30;
+/// 同一条记录最多保留的切片数
+const MAX_CHUNKS_PER_ITEM: usize = 2;
+
+/// 检索命中
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hit {
+    pub chunk_id: i64,
+    pub item_id: i64,
+    pub kind: String,
+    pub title: Option<String>,
+    pub text: String,
+    pub heading: Option<String>,
+    pub doc_summary: Option<String>,
+    pub summary: Option<String>,
+    pub tags: Vec<String>,
+    pub created_at: i64,
+    pub attachment_path: Option<String>,
+    /// 融合得分
+    pub score: f32,
+    /// 向量相似度(无则为 None)
+    pub vec_score: Option<f32>,
+}
+
+/// 检索参数
+#[derive(Debug, Clone)]
+pub struct SearchOptions {
+    /// 最终返回条数
+    pub top_n: usize,
+    /// 向量相关性阈值
+    pub threshold: f32,
+}
+
+/// 时间衰减系数:越新的记录类内容略微加权(最多 +20%),文档不衰减
+///
+/// 参数: kind 记录类型;created_at 创建时间(毫秒);now 当前时间(毫秒)
+/// 返回: 乘数
+pub fn recency_boost(kind: &str, created_at: i64, now: i64) -> f32 {
+    if kind == "document" {
+        return 1.0;
+    }
+    let age_days = ((now - created_at).max(0) as f32) / 86_400_000.0;
+    1.0 + 0.2 * (-age_days / 60.0).exp()
+}
+
+/// RRF 融合:输入多路有序 id 列表,输出 id → 得分
+///
+/// 参数: lists 每路按相关性降序的 id 列表
+/// 返回: 融合得分
+pub fn rrf_fuse(lists: &[Vec<i64>]) -> HashMap<i64, f32> {
+    let mut m: HashMap<i64, f32> = HashMap::new();
+    for l in lists {
+        for (rank, id) in l.iter().enumerate() {
+            *m.entry(*id).or_insert(0.0) += 1.0 / (RRF_K + rank as f32 + 1.0);
+        }
+    }
+    m
+}
+
+/// 全文检索:返回按 BM25 排序的切片 id
+fn fts_search(core: &Core, terms: &[String]) -> Vec<i64> {
+    let Some(expr) = tokenizer::fts_match_expr(terms) else {
+        return vec![];
+    };
+    let r = core.db.with(|c| {
+        let mut stmt = c.prepare("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2")?;
+        let rows = stmt.query_map(rusqlite::params![expr, RECALL_N as i64], |r| r.get::<_, i64>(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    });
+    match r {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("FTS 查询失败,已忽略: {e}");
+            vec![]
+        }
+    }
+}
+
+/// 读取切片详情
+fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = vec!["?"; ids.len()].join(",");
+    let sql = format!(
+        "SELECT c.id, c.item_id, i.kind, COALESCE(i.title, i.original_name), c.text, c.heading, c.doc_summary, \
+         m.summary, m.tags, i.created_at, i.attachment_path \
+         FROM chunks c JOIN items i ON i.id = c.item_id LEFT JOIN item_meta m ON m.item_id = i.id \
+         WHERE c.id IN ({placeholders})"
+    );
+    core.db.with(|c| {
+        let mut stmt = c.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
+            let tags: Option<String> = r.get(8)?;
+            let heading: Option<String> = r.get(5)?;
+            Ok(Hit {
+                chunk_id: r.get(0)?,
+                item_id: r.get(1)?,
+                kind: r.get(2)?,
+                title: r.get(3)?,
+                text: r.get(4)?,
+                heading: heading.filter(|h| !h.is_empty()),
+                doc_summary: r.get(6)?,
+                summary: r.get(7)?,
+                tags: tags
+                    .and_then(|t| serde_json::from_str(&t).ok())
+                    .unwrap_or_default(),
+                created_at: r.get(9)?,
+                attachment_path: r.get(10)?,
+                score: 0.0,
+                vec_score: None,
+            })
+        })?;
+        let mut map = HashMap::new();
+        for h in rows {
+            let h = h?;
+            map.insert(h.chunk_id, h);
+        }
+        Ok(map)
+    })
+}
+
+/// 全文命中是否可信:切片文本(含标签/摘要/标题)至少包含半数以上的查询关键词
+fn fts_hit_plausible(hit: &Hit, terms: &[String]) -> bool {
+    if terms.is_empty() {
+        return false;
+    }
+    let hay = format!(
+        "{} {} {} {}",
+        hit.text,
+        hit.title.clone().unwrap_or_default(),
+        hit.summary.clone().unwrap_or_default(),
+        hit.tags.join(" ")
+    )
+    .to_lowercase();
+    let matched = terms.iter().filter(|t| hay.contains(t.as_str())).count();
+    matched * 2 >= terms.len()
+}
+
+/// 混合检索
+///
+/// 参数: core 核心;query 查询文本;opts 检索参数
+/// 返回: 按融合得分降序的命中(已应用相关性闸门与每记录切片数上限)
+pub async fn hybrid_search(core: &Core, query: &str, opts: &SearchOptions) -> Result<Vec<Hit>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+    let settings = core.settings();
+
+    // 向量路(失败降级)
+    let mut vec_hits: Vec<crate::vector::VecHit> = Vec::new();
+    match core
+        .ollama()
+        .embed(
+            &settings.embed_model,
+            &[query.to_string()],
+            &settings.keep_alive,
+        )
+        .await
+    {
+        Ok(mut v) if !v.is_empty() => vec_hits = core.vindex.search(&v.remove(0), RECALL_N),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("查询向量化失败,降级为全文检索: {e}"),
+    }
+    let vec_scores: HashMap<i64, f32> = vec_hits.iter().map(|h| (h.chunk_id, h.score)).collect();
+
+    // 全文路
+    let terms = tokenizer::query_terms(query);
+    let fts_ids = fts_search(core, &terms);
+
+    // 融合
+    let vec_ids: Vec<i64> = vec_hits.iter().map(|h| h.chunk_id).collect();
+    let fused = rrf_fuse(&[vec_ids.clone(), fts_ids.clone()]);
+    let mut all_ids: Vec<i64> = fused.keys().copied().collect();
+    all_ids.sort_unstable();
+    let mut details = load_hits(core, &all_ids)?;
+    let now = crate::db::now_ms();
+    let fts_set: std::collections::HashSet<i64> = fts_ids.into_iter().collect();
+
+    let mut hits: Vec<Hit> = Vec::new();
+    for id in all_ids {
+        let Some(mut h) = details.remove(&id) else {
+            continue;
+        };
+        h.vec_score = vec_scores.get(&id).copied();
+        let pass_vec = h.vec_score.map(|s| s >= opts.threshold).unwrap_or(false);
+        let pass_fts = fts_set.contains(&id) && fts_hit_plausible(&h, &terms);
+        if !(pass_vec || pass_fts) {
+            continue;
+        }
+        h.score = fused[&id] * recency_boost(&h.kind, h.created_at, now);
+        hits.push(h);
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // 每条记录最多保留 N 个切片
+    let mut per_item: HashMap<i64, usize> = HashMap::new();
+    hits.retain(|h| {
+        let c = per_item.entry(h.item_id).or_insert(0);
+        *c += 1;
+        *c <= MAX_CHUNKS_PER_ITEM
+    });
+    hits.truncate(opts.top_n);
+    Ok(hits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rrf对两路都靠前的结果加分更多() {
+        let m = rrf_fuse(&[vec![1, 2, 3], vec![3, 1, 4]]);
+        assert!(m[&1] > m[&2]);
+        assert!(m[&1] > m[&4]);
+        assert!(m[&3] > m[&2]);
+    }
+
+    #[test]
+    fn 新记录加权文档不衰减() {
+        let day = 86_400_000;
+        let now = 1000 * day;
+        assert!(recency_boost("note", now, now) > recency_boost("note", now - 365 * day, now));
+        assert_eq!(recency_boost("document", 0, now), 1.0);
+        assert!(recency_boost("note", now, now) <= 1.2 + 1e-5);
+        // 未来时间不应产生超过上限的加权
+        assert!(recency_boost("note", now + day, now) <= 1.2 + 1e-5);
+    }
+}
