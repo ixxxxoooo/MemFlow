@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// 当前最新的数据库版本
-pub const LATEST_VERSION: i64 = 3;
+pub const LATEST_VERSION: i64 = 4;
 
 /// 只读连接池大小
 const READ_POOL_SIZE: usize = 4;
@@ -129,6 +129,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE items ADD COLUMN kb_id INTEGER NOT NULL DEFAULT 1;
     CREATE INDEX idx_items_kb ON items(kb_id, id DESC);
     ALTER TABLE chat_sessions ADD COLUMN kb_ids TEXT;
+    "#,
+    // v4:记录来源路径(文件夹导入时为「文件夹名/相对路径」)
+    r#"
+    ALTER TABLE items ADD COLUMN source_path TEXT;
     "#,
 ];
 

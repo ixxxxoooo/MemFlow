@@ -26,6 +26,8 @@ export interface Item {
   kind: ItemKind;
   /** 所属知识库 */
   kbId: number;
+  /** 文件夹导入时的来源路径(文件夹名/相对路径) */
+  sourcePath: string | null;
   title: string | null;
   content: string;
   contentLength: number;
@@ -250,4 +252,7 @@ export interface CaptureResult {
   created: number[];
   duplicates: number[];
   errors: string[];
+  /** 被跳过内容的汇总行(按原因合并) */
+  skipped: string[];
+  skippedCount: number;
 }

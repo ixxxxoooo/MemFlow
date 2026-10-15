@@ -6,11 +6,13 @@
 use crate::core::Core;
 use crate::error::{AppError, Result};
 use crate::extract::{self, FileKind};
+use crate::folder;
 use crate::queue;
 use crate::repo::{self, NewItem};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -44,6 +46,10 @@ pub struct CaptureResult {
     pub duplicates: Vec<i64>,
     /// 失败说明
     pub errors: Vec<String>,
+    /// 被跳过的内容汇总(按原因合并,如"不支持的类型(.zip) ×3")
+    pub skipped: Vec<String>,
+    /// 被跳过的总数
+    pub skipped_count: usize,
 }
 
 /// 已存储的附件信息
@@ -144,6 +150,86 @@ pub async fn stage_bytes(core: &Core, name: &str, bytes: Vec<u8>) -> Result<Stri
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// 单个文件的处理结果
+enum FileOutcome {
+    /// 需要新建的记录
+    New(Prepared),
+    /// 知识库内已存在相同文件,给出已有记录 id
+    Duplicate(i64),
+}
+
+/// 校验并存储单个文件,生成待写入的记录
+///
+/// 参数: core 核心;path 文件路径;label 用于错误提示的名称;kb_id 目标知识库;
+/// source_path 来源路径(文件夹导入时的相对路径)
+async fn prepare_file(
+    core: &Arc<Core>,
+    path: &Path,
+    label: &str,
+    kb_id: i64,
+    source_path: Option<String>,
+) -> Result<FileOutcome> {
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| AppError::Invalid(format!("文件不存在: {label}")))?;
+    if !meta.is_file() {
+        return Err(AppError::Invalid(format!("不是文件: {label}")));
+    }
+    let kind = extract::classify(path);
+    let (limit, kind_name) = match kind {
+        FileKind::Image => (MAX_IMAGE_BYTES, "image"),
+        FileKind::Document => (MAX_DOC_BYTES, "document"),
+        FileKind::Unsupported => {
+            return Err(AppError::Invalid(format!(
+                "不支持的文件类型: {}",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or(label)
+            )))
+        }
+    };
+    if meta.len() == 0 {
+        return Err(AppError::Invalid("文件为空".into()));
+    }
+    if meta.len() > limit {
+        return Err(AppError::Invalid(format!(
+            "文件过大(上限 {}MB)",
+            limit / 1024 / 1024
+        )));
+    }
+    let (ar, src) = (core.paths.attachments.clone(), path.to_path_buf());
+    let stored = tokio::task::spawn_blocking(move || store_attachment(&ar, &src))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))??;
+    // 暂存目录里的文件已复制进附件库,可以清理
+    if path.starts_with(&core.paths.tmp) {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    if let Some(id) = core
+        .db
+        .with(|c| repo::find_by_hash(c, &stored.hash, kind_name, kb_id))?
+    {
+        return Ok(FileOutcome::Duplicate(id));
+    }
+    let stem = Path::new(&stored.original_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let is_image = kind == FileKind::Image;
+    Ok(FileOutcome::New(Prepared {
+        item: NewItem {
+            kind: kind_name.into(),
+            title: if is_image { None } else { Some(stem) },
+            content: String::new(),
+            attachment_path: Some(stored.rel_path),
+            original_name: Some(stored.original_name),
+            mime: Some(extract::mime_of(&stored.ext).into()),
+            content_hash: Some(stored.hash),
+            kb_id: Some(kb_id),
+            source_path,
+        },
+    }))
+}
+
 /// 处理闪念提交:文字 → 笔记;图片 → 图片记录(文字作为说明);文档 → 文档记录
 ///
 /// 参数: core 核心;input 提交内容
@@ -169,83 +255,63 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
     let mut prepared: Vec<Prepared> = Vec::new();
     let mut has_image = false;
     let mut has_doc = false;
-    let tmp_root = core.paths.tmp.clone();
-    let attach_root = core.paths.attachments.clone();
+
+    // 本次导入已见过的 (内容哈希, 类型):同一批里内容相同的文件只导入一份
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut skip_map: BTreeMap<String, usize> = BTreeMap::new();
 
     for p in &input.paths {
         let path = PathBuf::from(p);
-        let outcome: Result<Option<Prepared>> = async {
-            let meta = tokio::fs::metadata(&path)
+        let is_dir = tokio::fs::metadata(&path)
+            .await
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
+        // 目录展开为其中受支持的文件;单个文件直接处理
+        let targets: Vec<(PathBuf, Option<String>)> = if is_dir {
+            let root = path.clone();
+            let scan = tokio::task::spawn_blocking(move || folder::scan(&root))
                 .await
-                .map_err(|_| AppError::Invalid(format!("文件不存在: {p}")))?;
-            if !meta.is_file() {
-                return Err(AppError::Invalid(format!("不是文件: {p}")));
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            for (reason, n) in &scan.skipped {
+                *skip_map.entry(reason.clone()).or_insert(0) += n;
             }
-            let kind = extract::classify(&path);
-            let (limit, kind_name) = match kind {
-                FileKind::Image => (MAX_IMAGE_BYTES, "image"),
-                FileKind::Document => (MAX_DOC_BYTES, "document"),
-                FileKind::Unsupported => {
-                    return Err(AppError::Invalid(format!(
-                        "不支持的文件类型: {}",
-                        path.file_name().and_then(|n| n.to_str()).unwrap_or(p)
-                    )))
+            scan.files
+                .into_iter()
+                .map(|f| (f.path, Some(f.rel)))
+                .collect()
+        } else {
+            vec![(path, None)]
+        };
+        let from_folder = is_dir;
+        for (path, rel) in targets {
+            let label = path.to_string_lossy().into_owned();
+            match prepare_file(core, &path, &label, kb_id, rel).await {
+                Ok(FileOutcome::New(pr)) => {
+                    let key = (
+                        pr.item.content_hash.clone().unwrap_or_default(),
+                        pr.item.kind.clone(),
+                    );
+                    if !seen.insert(key) {
+                        *skip_map
+                            .entry("与本次导入的另一文件内容相同".to_string())
+                            .or_insert(0) += 1;
+                        continue;
+                    }
+                    has_image |= pr.item.kind == "image";
+                    has_doc |= pr.item.kind == "document";
+                    prepared.push(pr);
                 }
-            };
-            if meta.len() == 0 {
-                return Err(AppError::Invalid("文件为空".into()));
+                Ok(FileOutcome::Duplicate(id)) => result.duplicates.push(id),
+                // 文件夹里的个别坏文件不算失败,归入"跳过"并给出原因
+                Err(e) if from_folder => {
+                    *skip_map.entry(e.to_string()).or_insert(0) += 1;
+                }
+                Err(e) => result.errors.push(e.to_string()),
             }
-            if meta.len() > limit {
-                return Err(AppError::Invalid(format!(
-                    "文件过大(上限 {}MB)",
-                    limit / 1024 / 1024
-                )));
-            }
-            let (ar, src) = (attach_root.clone(), path.clone());
-            let stored = tokio::task::spawn_blocking(move || store_attachment(&ar, &src))
-                .await
-                .map_err(|e| AppError::Other(e.to_string()))??;
-            // 暂存目录里的文件已复制进附件库,可以清理
-            if path.starts_with(&tmp_root) {
-                let _ = tokio::fs::remove_file(&path).await;
-            }
-            if let Some(id) = core
-                .db
-                .with(|c| repo::find_by_hash(c, &stored.hash, kind_name, kb_id))?
-            {
-                result.duplicates.push(id);
-                return Ok(None);
-            }
-            let stem = Path::new(&stored.original_name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let is_image = kind == FileKind::Image;
-            Ok(Some(Prepared {
-                item: NewItem {
-                    kind: kind_name.into(),
-                    title: if is_image { None } else { Some(stem) },
-                    content: String::new(),
-                    attachment_path: Some(stored.rel_path),
-                    original_name: Some(stored.original_name),
-                    mime: Some(extract::mime_of(&stored.ext).into()),
-                    content_hash: Some(stored.hash),
-                    kb_id: Some(kb_id),
-                },
-            }))
-        }
-        .await;
-        match outcome {
-            Ok(Some(pr)) => {
-                has_image |= pr.item.kind == "image";
-                has_doc |= pr.item.kind == "document";
-                prepared.push(pr);
-            }
-            Ok(None) => {}
-            Err(e) => result.errors.push(e.to_string()),
         }
     }
+    result.skipped_count = skip_map.values().sum();
+    result.skipped = folder::skip_lines(&skip_map);
 
     // 文字的归属:有图片则作为图片说明;否则(或同时有文档)独立成笔记
     if !text.is_empty() {

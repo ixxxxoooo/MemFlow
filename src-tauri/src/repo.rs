@@ -22,6 +22,8 @@ pub struct ItemView {
     pub attachment_path: Option<String>,
     pub original_name: Option<String>,
     pub mime: Option<String>,
+    /// 文件夹导入时的来源路径(文件夹名/相对路径)
+    pub source_path: Option<String>,
     pub status: String,
     pub error: Option<String>,
     pub created_at: i64,
@@ -76,6 +78,8 @@ pub struct NewItem {
     pub content_hash: Option<String>,
     /// 所属知识库;None 表示默认知识库
     pub kb_id: Option<i64>,
+    /// 来源路径(文件夹导入)
+    pub source_path: Option<String>,
 }
 
 /// 新建切片参数
@@ -198,7 +202,7 @@ fn item_select(full_content: bool) -> String {
     format!(
         "SELECT i.id, i.kind, i.title, {content_expr}, length(i.content), i.attachment_path, i.original_name, i.mime, \
          i.status, i.error, i.created_at, i.updated_at, m.summary, m.category, m.tags, m.entities, m.vision_text, \
-         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id), i.kb_id \
+         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id), i.kb_id, i.source_path \
          FROM items i LEFT JOIN item_meta m ON m.item_id = i.id"
     )
 }
@@ -231,6 +235,7 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
         prompt_version: r.get(18)?,
         chunk_count: r.get(19)?,
         kb_id: r.get(20)?,
+        source_path: r.get(21)?,
     })
 }
 
@@ -241,8 +246,8 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
 pub fn insert_item(c: &Connection, it: &NewItem) -> Result<i64> {
     let now = now_ms();
     c.execute(
-        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at,kb_id) \
-         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8,?9)",
+        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at,kb_id,source_path) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8,?9,?10)",
         params![
             it.kind,
             it.title,
@@ -252,7 +257,8 @@ pub fn insert_item(c: &Connection, it: &NewItem) -> Result<i64> {
             it.mime,
             it.content_hash,
             now,
-            it.kb_id.unwrap_or(DEFAULT_KB_ID)
+            it.kb_id.unwrap_or(DEFAULT_KB_ID),
+            it.source_path
         ],
     )?;
     Ok(c.last_insert_rowid())
@@ -307,7 +313,7 @@ pub fn list_items(c: &Connection, f: &ItemFilter) -> Result<Vec<ItemView>> {
     {
         sql.push_str(
             " AND instr(lower(COALESCE(i.content,'') || ' ' || COALESCE(i.title,'') || ' ' || COALESCE(i.original_name,'') || ' ' || \
-             COALESCE(m.summary,'') || ' ' || COALESCE(m.tags,'') || ' ' || COALESCE(m.vision_text,'')), ?) > 0",
+             COALESCE(m.summary,'') || ' ' || COALESCE(m.tags,'') || ' ' || COALESCE(m.vision_text,'') || ' ' || COALESCE(i.source_path,'')), ?) > 0",
         );
         args.push(q.to_lowercase().into());
     }

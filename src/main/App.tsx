@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { skipDetailLine, summarizeCapture } from "../lib/importSummary";
 import { useKb } from "../lib/kbStore";
 import { useApp } from "../lib/store";
 import type { QueueStatus } from "../lib/types";
@@ -64,8 +65,8 @@ export function App() {
           kb.rememberImport(target);
           const targetName = kb.kbs.find((k) => k.id === target)?.name ?? "默认知识库";
           const r = await api.captureSubmit(null, e.payload.paths, target);
-          if (r.created.length) toast(`已加入 ${r.created.length} 项到「${targetName}」,后台解析中`, "ok");
-          if (r.duplicates.length) toast(`${r.duplicates.length} 项已存在,已跳过`, "info");
+          const sum = summarizeCapture(r, targetName);
+          toast(`${sum.text}${r.created.length ? ",后台解析中" : ""}${sum.detail.length ? `(跳过:${skipDetailLine(sum.detail)})` : ""}`, sum.kind);
           if (r.errors.length) toast(r.errors.join(";"), "err");
           bumpData();
           void refreshStatus();
@@ -93,7 +94,7 @@ export function App() {
         </div>
         {dragging && (
           <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--accent)] bg-[var(--accent-soft)] backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-sm font-medium text-[var(--accent)]"><UploadIcon size={18} />松手即可导入图片 / 文档</div>
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--accent)]"><UploadIcon size={18} />松手即可导入图片 / 文档 / 文件夹</div>
           </div>
         )}
       </main>

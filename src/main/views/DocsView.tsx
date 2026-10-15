@@ -6,11 +6,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { fmtDate } from "../../lib/format";
+import { skipDetailLine, summarizeCapture } from "../../lib/importSummary";
 import { useKb } from "../../lib/kbStore";
 import { useApp } from "../../lib/store";
 import type { Item } from "../../lib/types";
 import { DeleteItemButton } from "../components/DeleteItemButton";
-import { MoveIcon, RefreshIcon, SearchIcon, SparkleIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { FolderIcon, MoveIcon, RefreshIcon, SearchIcon, SparkleIcon, TrashIcon, UploadIcon } from "../components/icons";
 import { MoveToMenu } from "../components/MoveToMenu";
 import { StatusChip } from "../components/ItemCard";
 
@@ -58,8 +59,11 @@ export function DocsView() {
     }
   };
 
-  const importFiles = async () => {
-    const picked = await open({ multiple: true, filters: [{ name: "文档", extensions: ["pdf", "md", "markdown", "txt", "docx"] }] });
+  /** 提交导入并汇总结果;folder 为 true 时选择整个文件夹(递归导入受支持的文件) */
+  const importFiles = async (folder = false) => {
+    const picked = folder
+      ? await open({ directory: true, multiple: false })
+      : await open({ multiple: true, filters: [{ name: "文档", extensions: ["pdf", "md", "markdown", "txt", "docx"] }] });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     const target = importTarget();
@@ -70,8 +74,9 @@ export function DocsView() {
       if (r.errors.length) toast(r.errors.join(";"), "err");
       return r;
     }, (r) => {
-      const x = r as { created: number[]; duplicates: number[] };
-      return `已导入 ${x.created.length} 个文档到「${targetName}」${x.duplicates.length ? `,${x.duplicates.length} 个已存在` : ""},后台解析中`;
+      const sum = summarizeCapture(r as Parameters<typeof summarizeCapture>[0], targetName);
+      const x = r as { created: number[]; skipped: string[] };
+      return `${sum.text}${x.created.length ? ",后台解析中" : ""}${sum.detail.length ? `(跳过:${skipDetailLine(sum.detail)})` : ""}`;
     });
   };
 
@@ -104,6 +109,9 @@ export function DocsView() {
           <SearchIcon size={14} className="text-[var(--fg-faint)]" />
           <input className="w-full bg-transparent text-[13px] outline-none" placeholder="搜索文档" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+        <button className="btn btn-secondary" title="递归导入文件夹里所有受支持的文件(跳过隐藏文件与 node_modules 等)" onClick={() => void importFiles(true)}>
+          <FolderIcon size={14} />导入文件夹
+        </button>
         <button className="btn btn-primary" onClick={() => void importFiles()}>
           <UploadIcon size={14} />导入文档
         </button>
@@ -133,7 +141,7 @@ export function DocsView() {
           </>
         ) : (
           <>
-            <span className="text-[var(--fg-dim)]">支持 PDF / Markdown / TXT / DOCX,导入后只做快速索引(不调用 AI),也可直接把文件拖进窗口</span>
+            <span className="text-[var(--fg-dim)]">支持 PDF / Markdown / TXT / DOCX,导入后只做快速索引(不调用 AI),也可直接把文件或文件夹拖进窗口</span>
             <div className="flex-1" />
             <button
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1 hover:bg-[var(--bg-soft)]"
@@ -151,7 +159,7 @@ export function DocsView() {
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 && !loading ? (
           <div className="pt-24 text-center text-sm text-[var(--fg-dim)]">
-            还没有文档。点击右上角「导入文档」,或把文件拖进来。
+            还没有文档。点击右上角「导入文档 / 导入文件夹」,或把文件、文件夹拖进来。
           </div>
         ) : (
           <table className="w-full text-[13px]">
@@ -180,6 +188,7 @@ export function DocsView() {
                         <span className="rounded bg-[var(--bg-soft)] px-1.5 py-px text-[10.5px] font-normal text-[var(--fg-dim)]">{kbs.find((k) => k.id === it.kbId)?.name}</span>
                       )}
                     </div>
+                    {it.sourcePath && <div className="line-clamp-1 text-[11px] text-[var(--fg-faint)]" title={it.sourcePath}>{it.sourcePath}</div>}
                     {it.summary && <div className="line-clamp-1 text-xs text-[var(--fg-dim)]">{it.summary}</div>}
                     <div className="mt-1 flex flex-wrap gap-1">{it.tags.slice(0, 5).map((t) => <span key={t} className="rounded-full bg-[var(--accent-soft)] px-1.5 text-[10.5px] text-[var(--accent)]">#{t}</span>)}</div>
                   </td>

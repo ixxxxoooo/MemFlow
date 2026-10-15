@@ -9,6 +9,7 @@ pub mod core;
 pub mod db;
 pub mod error;
 pub mod extract;
+pub mod folder;
 pub mod ingest;
 pub mod kb;
 pub mod layout;
