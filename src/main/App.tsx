@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { shortcutAction } from "../lib/appShortcuts";
 import { skipDetailLine, summarizeCapture } from "../lib/importSummary";
 import { FORMATS_SUMMARY } from "../lib/formats";
 import { dropTargetKb } from "../lib/kbScope";
@@ -15,6 +16,7 @@ import { UploadIcon } from "./components/icons";
 import { DocModal } from "./components/DocModal";
 import { ItemDrawer } from "./components/ItemDrawer";
 import { OrganizeDialog } from "./components/OrganizeDialog";
+import { CAPTURE_FILES_EVENT, QuickCaptureDialog } from "./components/QuickCaptureDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBanner } from "./components/StatusBanner";
 import { Toasts } from "./components/Toasts";
@@ -66,6 +68,11 @@ export function App() {
       else if (t === "leave") setDragging(false);
       else if (t === "drop") {
         setDragging(false);
+        // 「记一笔」对话框打开时:拖入的文件作为它的附件,不直接导入
+        if (useApp.getState().captureOpen) {
+          window.dispatchEvent(new CustomEvent(CAPTURE_FILES_EVENT, { detail: e.payload.paths }));
+          return;
+        }
         try {
           // 正在档案库里查看某个库 → 导入该库;其余情况一律导入默认库
           const { kbs } = useKb.getState();
@@ -85,6 +92,20 @@ export function App() {
     });
     return () => { p.then((f) => f()); };
   }, [toast, bumpData, refreshStatus]);
+
+  // 应用内快捷键:⌘, 设置、⌘N 记一笔、⌘1/2/3 切换视图
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const a = shortcutAction(e);
+      if (!a) return;
+      e.preventDefault();
+      const app = useApp.getState();
+      if (a === "capture") app.openCapture();
+      else app.setView(a);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // 切换视图时关闭抽屉,避免残留无关详情
   useEffect(() => { closeDrawer(); closeDocModal(); }, [view, closeDrawer, closeDocModal]);
@@ -112,6 +133,7 @@ export function App() {
       {drawer && view !== "settings" && <ItemDrawer />}
       <DocModal />
       <OrganizeDialog />
+      <QuickCaptureDialog />
       <Toasts />
     </div>
   );

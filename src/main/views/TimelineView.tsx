@@ -7,7 +7,7 @@ import { fmtDayLabel, groupBy } from "../../lib/format";
 import { useKb } from "../../lib/kbStore";
 import { useApp } from "../../lib/store";
 import type { Item, TagCount } from "../../lib/types";
-import { CloseIcon, SearchIcon, SparkleIcon } from "../components/icons";
+import { CloseIcon, PlusIcon, SearchIcon, SparkleIcon } from "../components/icons";
 import { ItemCard } from "../components/ItemCard";
 import { filterTags, foldTags } from "../../lib/tagFold";
 import { mergeCountOk, useOrganize } from "../../lib/organize";
@@ -15,7 +15,7 @@ import { mergeCountOk, useOrganize } from "../../lib/organize";
 const PAGE = 40;
 
 export function TimelineView() {
-  const { dataVersion, drawer, toast, status, refreshStatus, bumpData } = useApp();
+  const { dataVersion, drawer, toast, status, refreshStatus, bumpData, openCapture } = useApp();
   const [items, setItems] = useState<Item[]>([]);
   const [tags, setTags] = useState<TagCount[]>([]);
   const [tag, setTag] = useState<string | null>(null);
@@ -93,6 +93,7 @@ export function TimelineView() {
         <h2 className="text-[15px] font-semibold" data-tauri-drag-region>记忆时间流</h2>
         <span className="text-xs text-[var(--fg-faint)]" data-tauri-drag-region>共 {status?.stats.notes ?? 0} 条记录 · {status?.stats.images ?? 0} 张图片</span>
         <div className="flex-1" data-tauri-drag-region />
+        <button className="btn btn-primary" title="随手记一句话、粘贴截图或添加文件(⌘N)" onClick={openCapture}><PlusIcon size={13} />记一笔</button>
         <button className="btn btn-secondary" title="找出最近相近的零散记录,让 AI 合并成主题笔记" onClick={openSuggest}><SparkleIcon size={13} />整理碎片</button>
         <button className={`btn ${selectMode ? "btn-primary" : "btn-secondary"}`} title="选择多条笔记后 AI 归并" onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "完成选择" : "选择"}</button>
         {failed > 0 && (
@@ -163,7 +164,7 @@ export function TimelineView() {
         <div className="mx-auto max-w-[760px]">
           {items.length === 0 && !loading && (
             <div className="pt-24 text-center text-sm text-[var(--fg-dim)]">
-              {debounced || tag ? "没有符合条件的记录" : <>还没有记录。按下全局快捷键 <kbd className="rounded border border-[var(--line)] px-1.5">{status?.settings.shortcut.replace("CommandOrControl", "⌘").replace(/\+/g, " ")}</kbd> 随手记一句话,或拖入图片。</>}
+              {debounced || tag ? "没有符合条件的记录" : <>还没有记录。点击上方「记一笔」(⌘N),或在任何应用里按全局快捷键 <kbd className="rounded border border-[var(--line)] px-1.5">{status?.settings.shortcut.replace("CommandOrControl", "⌘").replace(/\+/g, " ")}</kbd> 唤起闪念胶囊,也可以拖入图片。</>}
             </div>
           )}
           {groups.map((g) => (

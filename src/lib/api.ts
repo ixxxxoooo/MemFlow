@@ -41,6 +41,8 @@ export const api = {
   /** 保存云端 API Key 到系统钥匙串,空串表示清除 */
   setLlmApiKey: (key: string, profileId: string | null = null) =>
     call<void>("set_llm_api_key", { key, profileId }),
+  /** 取回已保存的 API Key 明文(眼睛按钮用;会触发钥匙串授权) */
+  revealApiKey: (profileId: string | null = null) => call<string>("reveal_api_key", { profileId }),
   /** 重新读取钥匙串里的密钥(授权被拒绝后用它重新触发授权弹窗) */
   retryKeyAccess: (profileId: string | null = null) => call<void>("retry_key_access", { profileId }),
   /** 测试云端连接;key 为空时使用已保存的密钥 */

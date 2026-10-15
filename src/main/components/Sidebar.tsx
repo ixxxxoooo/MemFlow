@@ -3,7 +3,7 @@
 
 import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
-import { ChatIcon, LibraryIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
+import { ChatIcon, LibraryIcon, PlusIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
 
 const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
   { id: "chat", label: "AI 问答", icon: ChatIcon },
@@ -12,7 +12,7 @@ const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
 ];
 
 export function Sidebar() {
-  const { view, setView, status, queue, setDocsKb } = useApp();
+  const { view, setView, status, queue, setDocsKb, openCapture } = useApp();
   const running = status?.ollamaRunning ?? false;
   // 当前问答实际使用的模型(跟随输入框旁的切换)
   const { modelRef, models } = useChat();
@@ -52,6 +52,17 @@ export function Sidebar() {
       <div className="flex items-center gap-2 px-5 pb-3" data-tauri-drag-region>
         <SparkleIcon size={16} className="text-[var(--accent)]" />
         <span className="text-[15px] font-semibold tracking-tight">MemFlow</span>
+      </div>
+      <div className="px-2.5 pb-2.5">
+        <button
+          data-testid="quick-capture-btn"
+          title="随手记一句话、粘贴截图或添加文件(⌘N)"
+          onClick={openCapture}
+          className="btn btn-primary w-full justify-center"
+        >
+          <PlusIcon size={14} />记一笔
+          <kbd className="ml-1 rounded bg-white/20 px-1 text-[10.5px] font-normal">⌘N</kbd>
+        </button>
       </div>
       <nav className="flex flex-col gap-0.5 px-2.5">
         {NAV.map((n) => (

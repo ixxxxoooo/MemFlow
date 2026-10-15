@@ -28,6 +28,10 @@ interface AppState {
   pullHint: string | null;
   /** 数据变化计数,列表视图据此刷新 */
   dataVersion: number;
+  /** 「记一笔」对话框是否打开 */
+  captureOpen: boolean;
+  openCapture: () => void;
+  closeCapture: () => void;
   /** 档案库里当前打开的知识库;null 表示在知识库列表页 */
   docsKb: number | null;
   setDocsKb: (id: number | null) => void;
@@ -59,6 +63,9 @@ export const useApp = create<AppState>((set, get) => ({
   pull: null,
   pullHint: null,
   dataVersion: 0,
+  captureOpen: false,
+  openCapture: () => set({ captureOpen: true }),
+  closeCapture: () => set({ captureOpen: false }),
   docsKb: null,
   setDocsKb: (docsKb) => set({ docsKb }),
   setView: (view) => set({ view }),

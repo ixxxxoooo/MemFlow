@@ -9,6 +9,7 @@ import { useApp } from "../../lib/store";
 import type { LlmProfile } from "../../lib/types";
 import { BrandIcon } from "./BrandIcon";
 import { ConnResult, type ConnState } from "./ConnResult";
+import { SecretInput } from "./SecretInput";
 import { PlusIcon, TrashIcon } from "./icons";
 
 const inputCls = "w-full rounded-lg border border-[var(--line)] bg-[var(--bg-soft)] px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--accent)]";
@@ -132,12 +133,12 @@ export function ProfilesEditor({ profiles, onChange }: Props) {
               <input className={inputCls} value={p.model} onChange={(e) => patch(p.id, { model: e.target.value })} placeholder="模型名 deepseek-chat" />
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <input
-                type="password"
-                autoComplete="off"
+              <SecretInput
                 className={inputCls}
                 value={keys[p.id] ?? ""}
-                onChange={(e) => { clearConn(p.id); setKeys((m) => ({ ...m, [p.id]: e.target.value })); }}
+                onChange={(v) => { clearConn(p.id); setKeys((m) => ({ ...m, [p.id]: v })); }}
+                saved={has}
+                profileId={p.id}
                 placeholder={has ? "●●●●●●●●(已保存,填写新值可替换)" : "API Key,sk-..."}
               />
               <button className="btn btn-secondary btn-sm shrink-0" disabled={busy || !(keys[p.id] ?? "").trim()} onClick={() => void saveKey(p)}>保存密钥</button>

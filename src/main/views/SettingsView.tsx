@@ -10,6 +10,8 @@ import { eventToAccelerator, prettyAccelerator } from "../../lib/shortcut";
 import { useApp } from "../../lib/store";
 import type { Settings } from "../../lib/types";
 import { ConnResult, type ConnState } from "../components/ConnResult";
+import { SecretInput } from "../components/SecretInput";
+import { APP_SHORTCUTS } from "../../lib/appShortcuts";
 import { ProfilesEditor } from "../components/ProfilesEditor";
 import { PullControls } from "../components/PullControls";
 import { RerankControls } from "../components/RerankControls";
@@ -178,12 +180,12 @@ export function SettingsView() {
                   <Row label="模型名" hint="DeepSeek 常用 deepseek-chat(通用)或 deepseek-reasoner(推理,更慢)。"><input className={inputCls} value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} placeholder="deepseek-chat" /></Row>
                   <Row label="API Key" hint={keyErr ? `已保存,但读取失败:${keyErr}` : status.hasApiKey ? "已保存在 macOS 钥匙串,不会写入数据库或备份。填写新值并保存即可替换。" : "保存在 macOS 钥匙串,不会写入数据库或备份。"}>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        className={inputCls}
+                      <SecretInput
+                        className={inputCls.replace("w-60", "w-full")}
+                        wrapperClass="w-60"
                         value={keyInput}
-                        onChange={(e) => { setConn(null); setKeyInput(e.target.value); }}
+                        onChange={(v) => { setConn(null); setKeyInput(v); }}
+                        saved={status.hasApiKey}
                         placeholder={status.hasApiKey ? "●●●●●●●●(已保存)" : "sk-..."}
                       />
                       {keyErr && <button className="btn btn-secondary btn-sm" onClick={() => void retryKey()}>重新授权</button>}
@@ -312,6 +314,16 @@ export function SettingsView() {
                 >
                   {recording ? "请按下快捷键…" : prettyAccelerator(form.shortcut)}
                 </button>
+              </Row>
+              <Row label="应用内快捷键" hint="在 MemFlow 窗口内可用。">
+                <div className="space-y-1 text-[12.5px]" data-testid="app-shortcuts">
+                  {APP_SHORTCUTS.map((sc) => (
+                    <div key={sc.action} className="flex items-center justify-between gap-6">
+                      <span className="text-[var(--fg-dim)]">{sc.label}</span>
+                      <kbd className="rounded border border-[var(--line)] px-1.5 text-[11.5px]">{sc.keys}</kbd>
+                    </div>
+                  ))}
+                </div>
               </Row>
             </div>
           </section>

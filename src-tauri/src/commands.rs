@@ -304,6 +304,22 @@ pub fn set_llm_api_key(core: S<'_>, key: String, profile_id: Option<String>) -> 
     Ok(())
 }
 
+/// 取回已保存的 API Key 明文(用于设置页「眼睛」按钮;会触发钥匙串授权)
+///
+/// 参数: profile_id 档案标识,为空表示默认云端模型
+/// 返回: 明文密钥;未保存或读取失败返回错误原因。明文只返回给界面展示,不写日志、不缓存到前端
+#[tauri::command]
+pub fn reveal_api_key(core: S<'_>, profile_id: Option<String>) -> Result<String> {
+    let pid = profile_id.unwrap_or_else(|| crate::secrets::DEFAULT_PROFILE.to_string());
+    let r = core.key_try(&pid, true);
+    queue::emit_status(&core);
+    match r {
+        Ok(Some(k)) => Ok(k),
+        Ok(None) => Err(AppError::Invalid("还没有保存 API Key".into())),
+        Err(e) => Err(AppError::Invalid(e)),
+    }
+}
+
 /// 重新读取钥匙串中的密钥(用户在授权弹窗点过「拒绝」后,用它重新触发授权)
 ///
 /// 参数: profile_id 档案标识,为空表示默认云端模型

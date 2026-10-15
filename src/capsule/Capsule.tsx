@@ -5,32 +5,18 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { DEFAULT_KB_ID } from "../lib/kbScope";
-import { CloseIcon, FileIcon, ImageIcon, SparkleIcon } from "../main/components/icons";
-
-interface Attach {
-  id: number;
-  path: string;
-  name: string;
-  /** 粘贴图片的本地预览(object URL) */
-  preview?: string;
-}
+import { captureMessage, useCapture } from "../lib/useCapture";
+import { AttachChips } from "../main/components/AttachChips";
+import { SparkleIcon } from "../main/components/icons";
 
 const STALE_DRAFT_MS = 5 * 60 * 1000;
 
-let seq = 1;
-
 export function Capsule() {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<Attach[]>([]);
+  const { text, setText, files, error, setError, busy, addPaths, removeFile, onPaste, reset, submit: submitCapture } = useCapture();
   const [dragging, setDragging] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const hiddenAt = useRef(Date.now());
-  const stateRef = useRef({ text, files });
-  stateRef.current = { text, files };
 
   const focusInput = useCallback(() => {
     const el = ta.current;
@@ -48,15 +34,12 @@ export function Capsule() {
   useEffect(() => {
     focusInput();
     const p = listen("capsule-shown", () => {
-      if (Date.now() - hiddenAt.current > STALE_DRAFT_MS) {
-        setText("");
-        setFiles([]);
-      }
+      if (Date.now() - hiddenAt.current > STALE_DRAFT_MS) reset();
       setError("");
       setTimeout(focusInput, 30);
     });
     return () => { p.then((f) => f()); };
-  }, [focusInput]);
+  }, [focusInput, reset, setError]);
 
   // 窗口高度随内容自适应
   useLayoutEffect(() => {
@@ -76,17 +59,13 @@ export function Capsule() {
       if (t === "enter" || t === "over") setDragging(true);
       else if (t === "leave") setDragging(false);
       else if (e.payload.type === "drop") {
-        const dropped: string[] = e.payload.paths;
         setDragging(false);
-        setFiles((prev) => [
-          ...prev,
-          ...dropped.filter((p) => !prev.some((x) => x.path === p)).map((path) => ({ id: seq++, path, name: path.split("/").pop() ?? path })),
-        ]);
+        addPaths(e.payload.paths);
         focusInput();
       }
     });
     return () => { p.then((f) => f()); };
-  }, [focusInput]);
+  }, [focusInput, addPaths]);
 
   // 自动增高文本框
   useLayoutEffect(() => {
@@ -96,41 +75,11 @@ export function Capsule() {
     el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
   }, [text]);
 
-  const onPaste = async (e: React.ClipboardEvent) => {
-    const list = Array.from(e.clipboardData.files);
-    if (list.length === 0) return;
-    e.preventDefault();
-    for (const f of list) {
-      try {
-        const path = await api.stageFile(f);
-        const isImg = f.type.startsWith("image/");
-        setFiles((prev) => [...prev, { id: seq++, path, name: f.name || "粘贴的图片", preview: isImg ? URL.createObjectURL(f) : undefined }]);
-      } catch (err) {
-        setError((err as Error).message);
-      }
-    }
-  };
-
   const submit = async () => {
-    const { text: t, files: fs } = stateRef.current;
-    const trimmed = t.trim();
-    if ((!trimmed && fs.length === 0) || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      // 胶囊不选知识库:一律存入默认知识库
-      const r = await api.captureSubmit(trimmed || null, fs.map((f) => f.path), DEFAULT_KB_ID);
-      fs.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
-      setText("");
-      setFiles([]);
-      await hide();
-      const msg = r.created.length > 0 ? "✨ 已交由 AI 归档" : r.duplicates.length > 0 ? "已存在,已跳过重复内容" : "已保存";
-      void api.notifyToast(r.errors.length ? `${msg}(${r.errors.length} 项失败)` : msg);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    const r = await submitCapture();
+    if (!r) return;
+    await hide();
+    void api.notifyToast(captureMessage(r));
   };
 
   return (
@@ -158,28 +107,7 @@ export function Capsule() {
         />
         <kbd className="mt-0.5 shrink-0 rounded border border-[var(--line)] px-1.5 text-[11px] text-[var(--fg-faint)]">↵</kbd>
       </div>
-      {files.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 pb-3.5">
-          {files.map((f) => (
-            <div key={f.id} className="group relative flex items-center gap-2 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg-soft)]/70 p-1.5 pr-3 text-xs">
-              {f.preview ? (
-                <img src={f.preview} alt="" className="h-12 w-12 rounded-lg object-cover" />
-              ) : /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name) ? (
-                <ImageIcon size={18} className="m-3 text-[var(--accent)]" />
-              ) : (
-                <FileIcon size={18} className="m-3 text-[var(--accent)]" />
-              )}
-              <span className="max-w-[170px] truncate">{f.name}</span>
-              <button
-                className="absolute right-1 top-1 hidden rounded-full bg-black/55 p-0.5 text-white group-hover:block"
-                onClick={() => { f.preview && URL.revokeObjectURL(f.preview); setFiles((p) => p.filter((x) => x.id !== f.id)); }}
-              >
-                <CloseIcon size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <AttachChips files={files} onRemove={removeFile} className="px-4 pb-3.5" />
       {error && <div className="px-4 pb-3 text-xs text-[var(--err)]">{error}</div>}
       {(text || files.length > 0) && !error && (
         <div className="px-4 pb-2.5 text-[11px] text-[var(--fg-faint)]">Enter 保存 · Shift+Enter 换行 · Esc 收起(草稿会保留)</div>
