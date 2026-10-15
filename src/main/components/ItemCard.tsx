@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { fmtTime } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Item } from "../../lib/types";
+import { DeleteItemButton } from "./DeleteItemButton";
 import { AlertIcon, ImageIcon } from "./icons";
 import { useAttachmentUrl } from "./ItemDrawer";
 
@@ -41,8 +42,9 @@ export function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: str
   return (
     <div
       onClick={() => openDrawer(item.id)}
-      className={`pop-in cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected ? "border-[var(--accent)]" : "border-[var(--line)]"}`}
+      className={`group pop-in relative cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected ? "border-[var(--accent)]" : "border-[var(--line)]"}`}
     >
+      <DeleteItemButton id={item.id} className="absolute right-2 top-2 z-10 bg-[var(--bg-elev)]/90 shadow-sm" />
       {item.kind === "image" && (
         <div className="mb-3 overflow-hidden rounded-xl bg-[var(--bg-soft)]">
           {url ? <img src={url} alt={item.originalName ?? ""} loading="lazy" className="max-h-64 w-full object-contain" /> : <div className="flex h-24 items-center justify-center text-[var(--fg-faint)]"><ImageIcon size={24} /></div>}

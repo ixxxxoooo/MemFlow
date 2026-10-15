@@ -8,6 +8,7 @@ import { confirmDialog } from "../../lib/confirm";
 import { fmtDate } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Item } from "../../lib/types";
+import { DeleteItemButton } from "../components/DeleteItemButton";
 import { RefreshIcon, SearchIcon, SparkleIcon, TrashIcon, UploadIcon } from "../components/icons";
 import { StatusChip } from "../components/ItemCard";
 
@@ -131,12 +132,13 @@ export function DocsView() {
                 <th className="py-2">名称</th>
                 <th className="w-28 py-2">状态</th>
                 <th className="w-16 py-2">切片</th>
-                <th className="w-28 py-2 pr-6">导入时间</th>
+                <th className="w-28 py-2">导入时间</th>
+                <th className="w-14 py-2 pr-4"><span className="sr-only">操作</span></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => (
-                <tr key={it.id} onClick={() => openDocModal(it.id)} className={`cursor-default border-t border-[var(--line)] hover:bg-[var(--bg-soft)] ${docModal?.itemId === it.id ? "bg-[var(--accent-soft)]" : ""}`}>
+                <tr key={it.id} onClick={() => openDocModal(it.id)} className={`group/row cursor-default border-t border-[var(--line)] hover:bg-[var(--bg-soft)] ${docModal?.itemId === it.id ? "bg-[var(--accent-soft)]" : ""}`}>
                   <td className="py-2.5 pl-6" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(it.id)} onChange={() => setSelected((p) => { const n = new Set(p); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })} />
                   </td>
@@ -149,7 +151,10 @@ export function DocsView() {
                     {it.status === "done" ? <span className="text-[11px] text-[var(--ok)]">{it.metaModel ? "已索引 · AI" : "已索引"}</span> : <StatusChip item={it} />}
                   </td>
                   <td className="py-2.5 text-[var(--fg-dim)]">{it.chunkCount}</td>
-                  <td className="py-2.5 pr-6 text-[var(--fg-dim)]">{fmtDate(it.createdAt)}</td>
+                  <td className="py-2.5 text-[var(--fg-dim)]">{fmtDate(it.createdAt)}</td>
+                  <td className="py-2 pr-4">
+                    <DeleteItemButton id={it.id} confirmText="确定删除这个文档吗?此操作不可恢复。" revealClass="opacity-0 group-hover/row:opacity-100" />
+                  </td>
                 </tr>
               ))}
             </tbody>

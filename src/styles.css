@@ -2,40 +2,45 @@
 @import "tailwindcss";
 
 :root {
-  /* 素雅配色:暖灰米白 + 黛青灰蓝,所有文字对比度 ≥ 4:1 */
-  --bg: #faf9f7;
-  --bg-soft: #f1efeb;
+  /* 靛蓝紫 + 冷白灰:正文对比度 ≥ 7:1,次要文字与语义色 ≥ 4.5:1(已逐项校验) */
+  --bg: #f7f8fc;
+  --bg-soft: #eceef7;
   --bg-elev: #ffffff;
-  --bubble: #ebe8e2;
-  --fg: #2a2926;
-  --fg-dim: #5f5b55;
-  --fg-faint: #7d7972;
-  --line: rgba(60, 50, 40, 0.12);
-  --accent: #4a6572;
-  --accent-soft: rgba(74, 101, 114, 0.12);
+  --bubble: #e6e8f5;
+  --fg: #1b1d2e;
+  --fg-dim: #4a4e69;
+  --fg-faint: #676b88;
+  --line: rgba(40, 44, 90, 0.12);
+  --accent: #5457d6;
+  --accent-soft: rgba(84, 87, 214, 0.1);
   --on-accent: #ffffff;
-  --ok: #4f8a68;
-  --warn: #b8862f;
-  --err: #b4524f;
-  --sidebar-tint: rgba(244, 242, 238, 0.45);
-  --glass: rgba(250, 249, 247, 0.84);
+  --ok: #277a5a;
+  --warn: #8f5e06;
+  --err: #c0392b;
+  --on-err: #ffffff;
+  --sidebar-tint: rgba(240, 242, 250, 0.5);
+  --glass: rgba(247, 248, 252, 0.84);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1d1e1f;
-    --bg-soft: #272829;
-    --bg-elev: #2c2d2f;
-    --bubble: #34363a;
-    --fg: #ecebe8;
-    --fg-dim: #aaa7a0;
-    --fg-faint: #8b887f;
+    --bg: #14151f;
+    --bg-soft: #1d1f2d;
+    --bg-elev: #222536;
+    --bubble: #2b2e44;
+    --fg: #e9eaf5;
+    --fg-dim: #a9acc6;
+    --fg-faint: #8a8eaa;
     --line: rgba(255, 255, 255, 0.1);
-    --accent: #9bb3c0;
-    --accent-soft: rgba(155, 179, 192, 0.16);
-    --on-accent: #1d1e1f;
-    --sidebar-tint: rgba(32, 33, 35, 0.35);
-    --glass: rgba(40, 41, 43, 0.72);
+    --accent: #9a9cf5;
+    --accent-soft: rgba(154, 156, 245, 0.16);
+    --on-accent: #14152a;
+    --ok: #5fc79b;
+    --warn: #e0a94a;
+    --err: #f08a80;
+    --on-err: #2a0d0a;
+    --sidebar-tint: rgba(24, 25, 38, 0.35);
+    --glass: rgba(30, 32, 46, 0.72);
   }
 }
 
@@ -76,7 +81,7 @@ textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-se
   .btn-secondary:hover:not(:disabled) { background: var(--bg-soft); }
   .btn-ghost { background: transparent; color: var(--fg-dim); }
   .btn-ghost:hover:not(:disabled) { background: var(--bg-soft); color: var(--fg); }
-  .btn-danger { background: var(--err); color: #fff; }
+  .btn-danger { background: var(--err); color: var(--on-err); }
   .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 88%, #000); }
   .btn-sm { padding: 3px 10px; border-radius: 6px; }
 
@@ -103,7 +108,7 @@ textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-se
   /* 下拉框 */
   .select {
     appearance: none; -webkit-appearance: none; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--bg-soft) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%237d7972' stroke-width='1.5' stroke-linecap='round'/></svg>") no-repeat right 10px center;
+    background: var(--bg-soft) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a8ea6' stroke-width='1.5' stroke-linecap='round'/></svg>") no-repeat right 10px center;
     padding: 6px 28px 6px 10px; font-size: 13px; color: var(--fg); outline: none;
   }
   .select:focus { border-color: var(--accent); }
@@ -131,7 +136,7 @@ textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-se
 }
 .flow-border::before {
   content: ""; position: absolute; inset: -2px; border-radius: inherit; padding: 2px; pointer-events: none;
-  background: conic-gradient(from var(--angle), #9bb3c0, #d9d3c7, #b9c4b4, #c9b8a8, #9bb3c0);
+  background: conic-gradient(from var(--angle), #7b7bf5, #b9bbff, #8fd3c1, #ffc857, #7b7bf5);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
   animation: flow 2.2s linear infinite;
