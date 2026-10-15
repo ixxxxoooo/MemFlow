@@ -95,7 +95,7 @@ jobs:
           gh release create "$TAG" --draft $PRE --title "MemFlow $TAG" --notes-file release-notes.md \
             || gh release edit "$TAG" --draft --title "MemFlow $TAG" --notes-file release-notes.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.ref_type == 'tag'
         with:
           name: release-notes
@@ -175,7 +175,7 @@ jobs:
 
       - name: 手动触发时上传构建物
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.bundles }}-${{ matrix.target }}
           path: src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundles }}/*.${{ matrix.ext }}
