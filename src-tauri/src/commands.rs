@@ -215,6 +215,47 @@ pub async fn pull_model_direct(
     Ok(())
 }
 
+/// 列出本地重排序模型及安装状态
+#[tauri::command]
+pub fn rerank_models(core: S<'_>) -> Vec<crate::rerank::RerankModelStatus> {
+    crate::rerank::list_status(&core.paths.root)
+}
+
+/// 下载重排序模型(镜像优先,失败回退官方站点;断点续传 + sha256 校验)
+#[tauri::command]
+pub async fn download_rerank_model(
+    core: S<'_>,
+    id: String,
+    on_progress: Channel<PullProgress>,
+) -> Result<()> {
+    let token = acquire_pull_token()?;
+    let mirror = core.settings().hf_mirror;
+    let r = crate::rerank::download(
+        &core.cloud_http(),
+        &mirror,
+        &core.paths.root,
+        &id,
+        &token.0,
+        |p| {
+            let _ = on_progress.send(p);
+        },
+    )
+    .await;
+    release_pull_token();
+    r?;
+    // 下载完成后后台预热,首次提问就不用等加载
+    let core2 = core.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        let s = core2.settings();
+        if s.rerank_enabled && s.rerank_model == id {
+            if let Err(e) = core2.reranker.warm(&core2.paths.root, &id).await {
+                tracing::warn!("重排序模型预热失败: {e}");
+            }
+        }
+    });
+    Ok(())
+}
+
 /// 保存云端 API Key 到系统钥匙串(传空串表示清除)
 #[tauri::command]
 pub fn set_llm_api_key(core: S<'_>, key: String) -> Result<()> {

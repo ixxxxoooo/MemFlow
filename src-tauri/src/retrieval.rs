@@ -158,6 +158,58 @@ fn fts_hit_plausible(hit: &Hit, terms: &[String]) -> bool {
     matched * 2 >= terms.len()
 }
 
+/// 重排序后的最终得分:重排序概率为主,时效加权只作为很弱的平局项(最多 +0.03)
+///
+/// 参数: rerank_prob 重排序概率(0~1);recency 时效乘数(1.0~1.2)
+pub fn final_score(rerank_prob: f32, recency: f32) -> f32 {
+    rerank_prob + 0.03 * ((recency - 1.0) / 0.2).clamp(0.0, 1.0)
+}
+
+/// 用本地模型对候选重排序;未启用、未下载、失败或超时都保持原有 RRF 顺序
+async fn rerank_hits(core: &Core, query: &str, hits: &mut [Hit]) {
+    let s = core.settings();
+    if !s.rerank_enabled || hits.len() < 2 {
+        return;
+    }
+    if !crate::rerank::is_installed(&core.paths.root, &s.rerank_model) {
+        return;
+    }
+    let docs: Vec<String> = hits
+        .iter()
+        .map(|h| match &h.heading {
+            Some(hd) => format!("{} {}\n{}", h.title.clone().unwrap_or_default(), hd, h.text),
+            None => format!("{}\n{}", h.title.clone().unwrap_or_default(), h.text),
+        })
+        .collect();
+    let started = std::time::Instant::now();
+    match core
+        .reranker
+        .score(
+            &core.paths.root,
+            &s.rerank_model,
+            query,
+            docs,
+            crate::rerank::RERANK_BUDGET,
+        )
+        .await
+    {
+        Ok(scores) if scores.len() == hits.len() => {
+            let now = crate::db::now_ms();
+            for (h, p) in hits.iter_mut().zip(scores) {
+                h.score = final_score(p, recency_boost(&h.kind, h.created_at, now));
+            }
+            hits.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            tracing::debug!("重排序 {} 条,耗时 {:?}", hits.len(), started.elapsed());
+        }
+        Ok(_) => tracing::warn!("重排序返回数量不一致,已忽略"),
+        Err(e) => tracing::warn!("重排序失败,沿用 RRF 排序: {e}"),
+    }
+}
+
 /// 混合检索
 ///
 /// 参数: core 核心;query 查询文本;opts 检索参数
@@ -226,6 +278,10 @@ pub async fn hybrid_search(core: &Core, query: &str, opts: &SearchOptions) -> Re
         *c += 1;
         *c <= MAX_CHUNKS_PER_ITEM
     });
+    // 重排序只处理少量候选:取最终条数的 2 倍(至少 12、至多 24)
+    let cand = (opts.top_n * 2).clamp(12, 24);
+    hits.truncate(cand);
+    rerank_hits(core, query, &mut hits).await;
     hits.truncate(opts.top_n);
     Ok(hits)
 }
@@ -240,6 +296,15 @@ mod tests {
         assert!(m[&1] > m[&2]);
         assert!(m[&1] > m[&4]);
         assert!(m[&3] > m[&2]);
+    }
+
+    #[test]
+    fn 重排序概率为主时效仅作平局项() {
+        // 相关性差距大时,时效加权不能翻盘
+        assert!(final_score(0.9, 1.0) > final_score(0.5, 1.2));
+        // 相关性相同,更新的略靠前
+        assert!(final_score(0.5, 1.2) > final_score(0.5, 1.0));
+        assert!(final_score(0.5, 1.2) - final_score(0.5, 1.0) <= 0.03 + 1e-6);
     }
 
     #[test]

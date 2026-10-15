@@ -10,6 +10,8 @@ import { eventToAccelerator, prettyAccelerator } from "../../lib/shortcut";
 import { useApp } from "../../lib/store";
 import type { Settings } from "../../lib/types";
 import { PullControls } from "../components/PullControls";
+import { RerankControls } from "../components/RerankControls";
+import type { RerankModel } from "../../lib/types";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -33,6 +35,10 @@ export function SettingsView() {
   // 云端 API Key 输入框内容:只在内存中短暂停留,保存后立即清空
   const [keyInput, setKeyInput] = useState("");
   const [testing, setTesting] = useState(false);
+  // 本地重排序模型清单;下载结束(pull 回到 null)后刷新安装状态
+  const [rerankModels, setRerankModels] = useState<RerankModel[]>([]);
+  const pulling = useApp((s) => s.pull);
+  useEffect(() => { if (!pulling) void api.rerankModels().then(setRerankModels).catch(() => {}); }, [pulling]);
 
   useEffect(() => { if (status && !form) setForm(status.settings); }, [status, form]);
   if (!form || !status) return <div className="p-8 text-sm text-[var(--fg-dim)]">加载中…</div>;
@@ -195,6 +201,27 @@ export function SettingsView() {
                   <option value="vision">视觉模型(高精度)</option>
                 </select>
               </Row>
+              <Row label="本地重排序" hint="对检索召回的候选片段用本地模型再次精排,显著提升答案相关性;只在检索时多花约 1 秒。模型未下载时自动跳过。">
+                <input type="checkbox" className="switch" checked={form.rerankEnabled} onChange={(e) => set("rerankEnabled", e.target.checked)} />
+              </Row>
+              {form.rerankEnabled && (
+                <>
+                  <Row label="重排序模型" hint="base 体积小速度快(推荐);v2-m3 多语言更准但更慢更大。">
+                    <select className={`${inputCls} w-72`} value={form.rerankModel} onChange={(e) => set("rerankModel", e.target.value)}>
+                      {rerankModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                    </select>
+                  </Row>
+                  {(() => {
+                    const m = rerankModels.find((x) => x.id === form.rerankModel);
+                    return m ? (
+                      <Row label="模型文件" hint="保存在应用数据目录的 models/rerank 下;先走镜像,失败自动回退官方站点,支持断点续传与 sha256 校验。">
+                        <RerankControls id={m.id} installed={m.installed} size={m.size} />
+                      </Row>
+                    ) : null;
+                  })()}
+                  <Row label="下载镜像" hint="HuggingFace 镜像地址,国内网络可用 hf-mirror.com。"><input className={inputCls} value={form.hfMirror} onChange={(e) => set("hfMirror", e.target.value)} /></Row>
+                </>
+              )}
               <Row label="直连下载仓库" hint="「直连下载」使用的 Ollama 模型仓库地址,网络受限时可改成可访问的镜像。"><input className={inputCls} value={form.modelRegistry} onChange={(e) => set("modelRegistry", e.target.value)} /></Row>
             </div>
 

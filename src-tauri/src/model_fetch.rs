@@ -186,7 +186,7 @@ impl Throttle {
     }
 }
 
-/// 下载单个 blob:断点续传、停滞重试、sha256 校验
+/// 下载单个 Ollama blob:断点续传、停滞重试、sha256 校验
 ///
 /// 参数: http 客户端;url 下载地址;fin 最终路径;layer 层信息;span (之前已完成字节, 总字节);
 /// cancel 取消标志;progress 进度回调
@@ -199,11 +199,47 @@ async fn download_blob(
     cancel: &AtomicBool,
     progress: &mut (dyn FnMut(PullProgress) + Send),
 ) -> Result<()> {
+    let hex = layer.digest.trim_start_matches("sha256:").to_string();
+    let label = format!("下载 {}", &hex[..12]);
+    download_file(
+        http,
+        url,
+        fin,
+        layer.size,
+        Some(&hex),
+        &label,
+        span,
+        cancel,
+        progress,
+    )
+    .await
+}
+
+/// 下载单个文件:断点续传、停滞重试、可选 sha256 校验,通过校验后才改名到位
+///
+/// 参数: http 客户端;url 下载地址;fin 最终路径;size 期望字节数(0 表示未知);
+/// sha256 期望摘要(None 则只校验大小);label 进度文案;span (之前已完成字节, 总字节);
+/// cancel 取消标志;progress 进度回调
+#[allow(clippy::too_many_arguments)]
+pub async fn download_file(
+    http: &reqwest::Client,
+    url: &str,
+    fin: &Path,
+    size: u64,
+    sha256: Option<&str>,
+    label: &str,
+    span: (u64, u64),
+    cancel: &AtomicBool,
+    progress: &mut (dyn FnMut(PullProgress) + Send),
+) -> Result<()> {
+    let layer = Layer {
+        digest: String::new(),
+        size,
+    };
+    let label = label.to_string();
     // span = (之前已完成字节数, 总字节数)
     let (done_before, total) = span;
     let part = PathBuf::from(format!("{}.part", fin.display()));
-    let hex = layer.digest.trim_start_matches("sha256:").to_string();
-    let label = format!("下载 {}", &hex[..12]);
     let mut throttle = Throttle::new();
     let mut last_err = String::new();
 
@@ -312,6 +348,10 @@ async fn download_blob(
         }
     }
 
+    let Some(hex) = sha256.map(str::to_string) else {
+        tokio::fs::rename(&part, fin).await?;
+        return Ok(());
+    };
     progress(PullProgress {
         status: "校验中".into(),
         total,

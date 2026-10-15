@@ -164,6 +164,8 @@ pub struct Core {
     last_chat_model: Mutex<Option<String>>,
     /// 当前问答的取消标志
     pub chat_cancel: Mutex<Option<CancelToken>>,
+    /// 本地重排序器(懒加载、常驻)
+    pub reranker: crate::rerank::Reranker,
 }
 
 /// 问答活跃守卫:存活期间后台任务让路,避免与用户对话抢占 LLM
@@ -202,6 +204,7 @@ impl Core {
             stages: Stages::new(),
             last_chat_model: Mutex::new(None),
             chat_cancel: Mutex::new(None),
+            reranker: crate::rerank::Reranker::default(),
         };
         let n = core.vindex.load_from_db(&core.db, &settings.embed_model)?;
         tracing::info!("向量索引已载入 {n} 条");
@@ -234,6 +237,10 @@ impl Core {
         *self.settings.write().unwrap() = new.clone();
         if old.embed_model != new.embed_model {
             self.vindex.load_from_db(&self.db, &new.embed_model)?;
+        }
+        // 关闭重排序或切换模型后释放旧会话(约数百 MB 内存)
+        if !new.rerank_enabled || old.rerank_model != new.rerank_model {
+            self.reranker.unload();
         }
         Ok(())
     }

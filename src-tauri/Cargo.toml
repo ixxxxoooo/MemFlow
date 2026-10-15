@@ -42,6 +42,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 base64 = "0.22"
+# 本地 ONNX 重排序(bge-reranker)。模型文件由 model_fetch 走镜像下载,这里不启用 hf-hub
+fastembed = { version = "7", default-features = false, features = ["ort-download-binaries-native-tls"], optional = true }
+
+[features]
+default = ["rerank"]
+# 本地重排序;关闭后检索只做 RRF 融合
+rerank = ["dep:fastembed"]
 
 # API Key 存系统钥匙串(仅 macOS)
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -40,6 +40,8 @@ interface AppState {
   itemsDeleted: (ids: number[]) => void;
   toast: (text: string, kind?: ToastItem["kind"]) => void;
   startPull: (name: string, direct: boolean) => Promise<void>;
+  /** 下载本地重排序模型(与 Ollama 模型共用"同时仅一个下载"名额,name 为 rerank:<id>) */
+  startRerankPull: (id: string) => Promise<void>;
 }
 
 let toastSeq = 1;
@@ -100,6 +102,20 @@ export const useApp = create<AppState>((set, get) => ({
     } finally {
       set({ pull: null });
       void get().refreshStatus();
+    }
+  },
+  startRerankPull: async (id) => {
+    if (get().pull) return;
+    set({ pull: { name: `rerank:${id}`, direct: false, progress: null } });
+    const onProgress = (progress: PullProgress) =>
+      set((s) => (s.pull ? { pull: { ...s.pull, progress } } : {}));
+    try {
+      await api.downloadRerankModel(id, onProgress);
+      get().toast("重排序模型下载完成", "ok");
+    } catch (e) {
+      get().toast(`下载失败:${(e as Error).message}`, "err");
+    } finally {
+      set({ pull: null });
     }
   },
 }));

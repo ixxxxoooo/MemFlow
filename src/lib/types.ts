@@ -76,6 +76,20 @@ export interface Settings {
   importConcurrency: number;
   /** PDF 解析模式:auto 文本层+本机 OCR / vision 视觉模型逐页解析 */
   pdfParseMode: "auto" | "vision";
+  /** 本地重排序开关(模型未下载时自动跳过) */
+  rerankEnabled: boolean;
+  /** 重排序模型标识 */
+  rerankModel: string;
+  /** 重排序模型下载镜像 */
+  hfMirror: string;
+}
+
+export interface RerankModel {
+  id: string;
+  label: string;
+  /** 总下载大小(字节) */
+  size: number;
+  installed: boolean;
 }
 
 export interface Stats {

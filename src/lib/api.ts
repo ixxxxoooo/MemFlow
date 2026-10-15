@@ -4,7 +4,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus, CaptureResult, ChatEvent, ItemDetail, ItemFilter, Item, PullProgress,
-  Session, Settings, StoredMessage, TagCount,
+  RerankModel, Session, Settings, StoredMessage, TagCount,
 } from "./types";
 
 /** 调用后端命令,把字符串错误统一包装成 Error */
@@ -31,6 +31,13 @@ export const api = {
     return call<void>("pull_model_direct", { name, onProgress: ch });
   },
   cancelPull: () => call<void>("cancel_pull"),
+  /** 本地重排序模型及安装状态 */
+  rerankModels: () => call<RerankModel[]>("rerank_models"),
+  downloadRerankModel: (id: string, onProgress: (p: PullProgress) => void) => {
+    const ch = new Channel<PullProgress>();
+    ch.onmessage = onProgress;
+    return call<void>("download_rerank_model", { id, onProgress: ch });
+  },
   /** 保存云端 API Key 到系统钥匙串,空串表示清除 */
   setLlmApiKey: (key: string) => call<void>("set_llm_api_key", { key }),
   /** 测试云端连接;key 为空时使用已保存的密钥 */

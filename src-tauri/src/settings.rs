@@ -46,6 +46,12 @@ pub struct Settings {
     pub import_concurrency: u32,
     /// PDF 解析模式:auto = 文本层 + 扫描页自动 OCR(推荐);vision = 视觉模型逐页转 Markdown(慢,表格/版面更准)
     pub pdf_parse_mode: String,
+    /// 是否启用本地重排序(模型未下载时自动跳过)
+    pub rerank_enabled: bool,
+    /// 重排序模型标识(见 `rerank::SPECS`)
+    pub rerank_model: String,
+    /// 重排序模型下载使用的 HuggingFace 镜像地址
+    pub hf_mirror: String,
 }
 
 /// PDF 解析模式:自动(文本层 + 本机 OCR)
@@ -80,6 +86,9 @@ impl Default for Settings {
             model_registry: "https://registry.ollama.ai".into(),
             import_concurrency: 0,
             pdf_parse_mode: PDF_MODE_AUTO.into(),
+            rerank_enabled: true,
+            rerank_model: crate::rerank::DEFAULT_MODEL.into(),
+            hf_mirror: "https://hf-mirror.com".into(),
         }
     }
 }
@@ -144,6 +153,14 @@ impl Settings {
         if self.pdf_parse_mode != PDF_MODE_AUTO && self.pdf_parse_mode != PDF_MODE_VISION {
             return Err(AppError::Invalid(
                 "PDF 解析模式只能是 auto 或 vision".into(),
+            ));
+        }
+        if crate::rerank::spec_of(&self.rerank_model).is_none() {
+            return Err(AppError::Invalid("未知的重排序模型".into()));
+        }
+        if !(self.hf_mirror.starts_with("http://") || self.hf_mirror.starts_with("https://")) {
+            return Err(AppError::Invalid(
+                "镜像地址必须以 http:// 或 https:// 开头".into(),
             ));
         }
         if self.import_concurrency > 8 {
@@ -224,6 +241,18 @@ mod tests {
         let s: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.import_concurrency, 0);
         assert_eq!(s.pdf_parse_mode, PDF_MODE_AUTO);
+        assert!(s.rerank_enabled);
+        assert_eq!(s.rerank_model, crate::rerank::DEFAULT_MODEL);
+        let bad_rerank = Settings {
+            rerank_model: "nope".into(),
+            ..Settings::default()
+        };
+        assert!(bad_rerank.validate().is_err());
+        let bad_mirror = Settings {
+            hf_mirror: "ftp://x".into(),
+            ..Settings::default()
+        };
+        assert!(bad_mirror.validate().is_err());
         let bad_mode = Settings {
             pdf_parse_mode: "other".into(),
             ..Settings::default()

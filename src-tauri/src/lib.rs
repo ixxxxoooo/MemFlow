@@ -21,6 +21,7 @@ pub mod pipeline;
 pub mod prompts;
 pub mod queue;
 pub mod repo;
+pub mod rerank;
 pub mod retrieval;
 pub mod secrets;
 pub mod settings;
@@ -61,6 +62,19 @@ pub fn run() {
             let core = Core::new(paths, db, Arc::new(TauriSink(app.handle().clone())))?;
             let shortcut = core.settings().shortcut;
             app.manage(core.clone());
+            // 已安装重排序模型时后台预热,避免首次提问才加载
+            {
+                let core = core.clone();
+                tauri::async_runtime::spawn(async move {
+                    let s = core.settings();
+                    if s.rerank_enabled && rerank::is_installed(&core.paths.root, &s.rerank_model) {
+                        if let Err(e) = core.reranker.warm(&core.paths.root, &s.rerank_model).await
+                        {
+                            tracing::warn!("重排序模型预热失败: {e}");
+                        }
+                    }
+                });
+            }
             tauri::async_runtime::spawn(queue::run_worker(core));
             windows::setup(app.handle(), &shortcut)?;
             Ok(())
@@ -84,6 +98,8 @@ pub fn run() {
             commands::set_llm_api_key,
             commands::test_llm_connection,
             commands::cancel_pull,
+            commands::rerank_models,
+            commands::download_rerank_model,
             commands::get_settings,
             commands::update_settings,
             commands::capture_submit,
