@@ -99,7 +99,7 @@ impl VectorIndex {
     pub fn load_from_db(&self, db: &Db, model: &str) -> Result<usize> {
         let mut items: HashMap<i64, Vec<Entry>> = HashMap::new();
         let mut count = 0usize;
-        db.with(|c| {
+        db.with_read(|c| {
             let mut stmt = c.prepare(
                 "SELECT id, item_id, embedding FROM chunks WHERE embed_model = ?1 AND embedding IS NOT NULL",
             )?;

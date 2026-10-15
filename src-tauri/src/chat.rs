@@ -261,7 +261,7 @@ pub async fn ask(
             core.db.with(|c| repo::create_session(c, &title))?
         }
     };
-    let prior = core.db.with(|c| repo::list_messages(c, sid))?;
+    let prior = core.db.with_read(|c| repo::list_messages(c, sid))?;
     core.db
         .with(|c| repo::add_message(c, sid, "user", q, None).map(|_| ()))?;
     emit(ChatEvent::Session { session_id: sid });

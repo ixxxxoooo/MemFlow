@@ -113,7 +113,7 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
         required: settings.vision_enabled,
         local: true,
     });
-    let stats = core.db.with(|c| repo::stats(c, &settings.embed_model))?;
+    let stats = core.db.with_read(|c| repo::stats(c, &settings.embed_model))?;
     Ok(AppStatus {
         ollama_running: running,
         ollama_version: version,
@@ -304,13 +304,13 @@ pub async fn stage_file(core: S<'_>, request: Request<'_>) -> Result<String> {
 /// 记录列表
 #[tauri::command]
 pub fn list_items(core: S<'_>, filter: ItemFilter) -> Result<Vec<ItemView>> {
-    core.db.with(|c| repo::list_items(c, &filter))
+    core.db.with_read(|c| repo::list_items(c, &filter))
 }
 
 /// 记录详情(含完整原文与切片)
 #[tauri::command]
 pub fn get_item(core: S<'_>, id: i64) -> Result<ItemDetail> {
-    core.db.with(|c| {
+    core.db.with_read(|c| {
         let item = repo::get_item(c, id)?.ok_or_else(|| AppError::Invalid("记录不存在".into()))?;
         let chunks = repo::list_chunks(c, id)?;
         Ok(ItemDetail { item, chunks })
@@ -320,7 +320,7 @@ pub fn get_item(core: S<'_>, id: i64) -> Result<ItemDetail> {
 /// 标签统计
 #[tauri::command]
 pub fn list_tags(core: S<'_>) -> Result<Vec<TagCount>> {
-    core.db.with(repo::tag_counts)
+    core.db.with_read(repo::tag_counts)
 }
 
 /// 编辑原文(会触发重新解析)
@@ -386,13 +386,13 @@ pub fn chat_cancel(core: S<'_>) {
 /// 会话列表
 #[tauri::command]
 pub fn list_sessions(core: S<'_>) -> Result<Vec<SessionView>> {
-    core.db.with(repo::list_sessions)
+    core.db.with_read(repo::list_sessions)
 }
 
 /// 会话消息
 #[tauri::command]
 pub fn get_session_messages(core: S<'_>, session_id: i64) -> Result<Vec<MessageView>> {
-    core.db.with(|c| repo::list_messages(c, session_id))
+    core.db.with_read(|c| repo::list_messages(c, session_id))
 }
 
 /// 删除会话

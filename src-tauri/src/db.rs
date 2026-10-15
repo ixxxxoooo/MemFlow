@@ -4,15 +4,20 @@
 //! 设计要点:
 //! - 单文件数据库,WAL 模式,外键开启
 //! - 通过 `PRAGMA user_version` 做版本化迁移,升级前自动备份旧库
-//! - 连接用 Mutex 串行化,所有查询都是短事务
+//! - 读写分离:1 个写连接 + 若干只读连接(WAL 下读写互不阻塞),
+//!   检索/列表/聊天走读池,入库的长写事务不会卡住界面查询
 
 use crate::error::{AppError, Result};
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OpenFlags, Transaction};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// 当前最新的数据库版本
-pub const LATEST_VERSION: i64 = 1;
+pub const LATEST_VERSION: i64 = 2;
+
+/// 只读连接池大小
+const READ_POOL_SIZE: usize = 4;
 
 /// 迁移脚本列表,下标 i 对应从版本 i 升级到 i+1
 const MIGRATIONS: &[&str] = &[
@@ -101,7 +106,20 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_chat_messages_session ON chat_messages(session_id, id);
     "#,
+    // v2:回答记录模型与耗时;会话记住所选模型;切片记录页码
+    r#"
+    ALTER TABLE chat_messages ADD COLUMN model TEXT;
+    ALTER TABLE chat_messages ADD COLUMN provider TEXT;
+    ALTER TABLE chat_messages ADD COLUMN elapsed_ms INTEGER;
+    ALTER TABLE chat_messages ADD COLUMN first_token_ms INTEGER;
+    ALTER TABLE chat_sessions ADD COLUMN model_ref TEXT;
+    ALTER TABLE chunks ADD COLUMN page INTEGER;
+    "#,
 ];
+
+/// 性能相关 PRAGMA:64MB 页缓存、256MB 内存映射、临时表放内存
+const PERF_PRAGMAS: &str =
+    "PRAGMA cache_size=-65536; PRAGMA mmap_size=268435456; PRAGMA temp_store=MEMORY;";
 
 /// 当前毫秒时间戳
 ///
@@ -112,7 +130,12 @@ pub fn now_ms() -> i64 {
 
 /// 数据库句柄(线程安全)
 pub struct Db {
+    /// 唯一的写连接
     conn: Mutex<Connection>,
+    /// 只读连接池(内存库为空,此时读操作回退到写连接)
+    readers: Vec<Mutex<Connection>>,
+    /// 轮询起点,让并发读尽量分散到不同连接
+    next_reader: AtomicUsize,
 }
 
 impl Db {
@@ -141,7 +164,20 @@ impl Db {
             )));
         }
         let conn = Connection::open(path)?;
-        Self::init(conn)
+        let mut db = Self::init(conn)?;
+        // 写连接完成迁移并建立 WAL 后再开只读连接
+        for _ in 0..READ_POOL_SIZE {
+            let c = Connection::open_with_flags(
+                path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            c.busy_timeout(std::time::Duration::from_secs(10))?;
+            c.execute_batch(PERF_PRAGMAS)?;
+            db.readers.push(Mutex::new(c));
+        }
+        Ok(db)
     }
 
     /// 创建内存数据库(测试使用)
@@ -157,6 +193,7 @@ impl Db {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;",
         )?;
+        conn.execute_batch(PERF_PRAGMAS)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         for v in version..LATEST_VERSION {
             let tx = conn.transaction()?;
@@ -166,6 +203,8 @@ impl Db {
         }
         Ok(Db {
             conn: Mutex::new(conn),
+            readers: Vec::new(),
+            next_reader: AtomicUsize::new(0),
         })
     }
 
@@ -178,6 +217,30 @@ impl Db {
             .conn
             .lock()
             .map_err(|_| AppError::Other("数据库锁已损坏".into()))?;
+        f(&guard)
+    }
+
+    /// 在只读连接池上执行查询(闭包内不得写库)。
+    ///
+    /// WAL 模式下读连接看到的是其开始读时已提交的最新数据,且不会被写事务阻塞。
+    ///
+    /// 参数: f 使用只读连接的闭包
+    /// 返回: 闭包返回值
+    pub fn with_read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let n = self.readers.len();
+        if n == 0 {
+            return self.with(f);
+        }
+        let start = self.next_reader.fetch_add(1, Ordering::Relaxed) % n;
+        // 先找一个空闲连接,都忙时才阻塞等待起点连接
+        for i in 0..n {
+            if let Ok(guard) = self.readers[(start + i) % n].try_lock() {
+                return f(&guard);
+            }
+        }
+        let guard = self.readers[start]
+            .lock()
+            .map_err(|_| AppError::Other("数据库读锁已损坏".into()))?;
         f(&guard)
     }
 
@@ -227,6 +290,81 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn v1库可升级到v2并保留数据() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("old.db");
+        {
+            // 模拟旧版本:只执行 v1 迁移
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.execute_batch("PRAGMA user_version = 1;").unwrap();
+            c.execute(
+                "INSERT INTO chat_sessions(title, created_at, updated_at) VALUES('旧会话', 1, 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let db = Db::open(&p, Some(&dir.path().join("bk"))).unwrap();
+        db.with(|c| {
+            let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            assert_eq!(v, 2);
+            let t: String = c.query_row("SELECT title FROM chat_sessions", [], |r| r.get(0))?;
+            assert_eq!(t, "旧会话");
+            // 新列可用
+            c.execute("UPDATE chat_sessions SET model_ref='ollama:x'", [])?;
+            c.execute("UPDATE chunks SET page=1", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_dir(dir.path().join("bk")).unwrap().count(), 1, "升级前应自动备份");
+    }
+
+    #[test]
+    fn 读池能读到写连接已提交的数据且读连接只读() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("t.db"), None).unwrap();
+        db.with(|c| {
+            c.execute("INSERT INTO settings(key,value) VALUES('k','v')", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let v: String = db
+            .with_read(|c| Ok(c.query_row("SELECT value FROM settings WHERE key='k'", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(v, "v");
+        // 读连接禁止写入
+        let w = db.with_read(|c| Ok(c.execute("DELETE FROM settings", [])?));
+        assert!(w.is_err());
+    }
+
+    #[test]
+    fn 写事务进行中读池不被阻塞() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = std::sync::Arc::new(Db::open(&dir.path().join("t.db"), None).unwrap());
+        let (tx_started, rx_started) = std::sync::mpsc::channel();
+        let (tx_done, rx_done) = std::sync::mpsc::channel::<()>();
+        let d2 = db.clone();
+        let h = std::thread::spawn(move || {
+            d2.with_tx(|tx| {
+                tx.execute("INSERT INTO settings(key,value) VALUES('a','1')", [])?;
+                tx_started.send(()).unwrap();
+                // 持有写事务,直到主线程读完
+                rx_done.recv().unwrap();
+                Ok(())
+            })
+            .unwrap();
+        });
+        rx_started.recv().unwrap();
+        // 写连接被占用时,读池仍可立即查询(且看不到未提交数据)
+        let n: i64 = db
+            .with_read(|c| Ok(c.query_row("SELECT count(*) FROM settings", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(n, 0);
+        tx_done.send(()).unwrap();
+        h.join().unwrap();
     }
 
     #[test]

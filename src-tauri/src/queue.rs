@@ -97,7 +97,7 @@ pub fn enqueue_item(c: &Connection, item_id: i64, mode: &str) -> Result<bool> {
 ///
 /// 参数: core 核心
 pub fn queue_status(core: &Core) -> Result<QueueStatus> {
-    let mut st = core.db.with(|c| {
+    let mut st = core.db.with_read(|c| {
         let cnt = |s: &str| -> rusqlite::Result<i64> { c.query_row(&format!("SELECT count(*) FROM jobs WHERE status='{s}'"), [], |r| r.get(0)) };
         let blocked: Option<String> = c
             .query_row(
@@ -109,7 +109,7 @@ pub fn queue_status(core: &Core) -> Result<QueueStatus> {
         Ok(QueueStatus { pending: cnt("pending")?, running: cnt("running")?, failed: cnt("failed")?, current_item: None, blocked_reason: blocked })
     })?;
     if let Some(cur) = core.current_job.lock().unwrap().clone() {
-        let title = core.db.with(|c| repo::get_item(c, cur.item_id))?.map(
+        let title = core.db.with_read(|c| repo::get_item(c, cur.item_id))?.map(
             |it| json!({"id": it.id, "kind": it.kind, "title": it.title.or(it.original_name)}),
         );
         st.current_item = title;

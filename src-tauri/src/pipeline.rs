@@ -247,7 +247,7 @@ pub async fn process_item(
     mode: &str,
     token: &CancelToken,
 ) -> Result<()> {
-    let Some(item) = core.db.with(|c| repo::get_item(c, item_id))? else {
+    let Some(item) = core.db.with_read(|c| repo::get_item(c, item_id))? else {
         return Ok(());
     };
     core.db

@@ -80,8 +80,8 @@ fn fts_search(core: &Core, terms: &[String]) -> Vec<i64> {
     let Some(expr) = tokenizer::fts_match_expr(terms) else {
         return vec![];
     };
-    let r = core.db.with(|c| {
-        let mut stmt = c.prepare("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2")?;
+    let r = core.db.with_read(|c| {
+        let mut stmt = c.prepare_cached("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2")?;
         let rows = stmt.query_map(rusqlite::params![expr, RECALL_N as i64], |r| r.get::<_, i64>(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     });
@@ -106,7 +106,7 @@ fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
          FROM chunks c JOIN items i ON i.id = c.item_id LEFT JOIN item_meta m ON m.item_id = i.id \
          WHERE c.id IN ({placeholders})"
     );
-    core.db.with(|c| {
+    core.db.with_read(|c| {
         let mut stmt = c.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
             let tags: Option<String> = r.get(8)?;

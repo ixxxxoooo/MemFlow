@@ -255,7 +255,7 @@ pub fn list_items(c: &Connection, f: &ItemFilter) -> Result<Vec<ItemView>> {
     }
     sql.push_str(" ORDER BY i.id DESC LIMIT ?");
     args.push(f.limit.unwrap_or(50).clamp(1, 200).into());
-    let mut stmt = c.prepare(&sql)?;
+    let mut stmt = c.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(args), map_item)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
@@ -386,7 +386,7 @@ pub fn clear_chunks(c: &Connection, item_id: i64) -> Result<()> {
 
 /// 读取某记录的切片
 pub fn list_chunks(c: &Connection, item_id: i64) -> Result<Vec<ChunkView>> {
-    let mut stmt = c.prepare("SELECT id, seq, text, heading, doc_summary, embed_model FROM chunks WHERE item_id = ?1 ORDER BY seq")?;
+    let mut stmt = c.prepare_cached("SELECT id, seq, text, heading, doc_summary, embed_model FROM chunks WHERE item_id = ?1 ORDER BY seq")?;
     let rows = stmt.query_map([item_id], |r| {
         Ok(ChunkView {
             id: r.get(0)?,
@@ -490,7 +490,7 @@ pub fn list_sessions(c: &Connection) -> Result<Vec<SessionView>> {
 
 /// 读取会话消息
 pub fn list_messages(c: &Connection, session_id: i64) -> Result<Vec<MessageView>> {
-    let mut stmt = c.prepare("SELECT id, role, content, sources, created_at FROM chat_messages WHERE session_id = ?1 ORDER BY id")?;
+    let mut stmt = c.prepare_cached("SELECT id, role, content, sources, created_at FROM chat_messages WHERE session_id = ?1 ORDER BY id")?;
     let rows = stmt.query_map([session_id], |r| {
         let sources: Option<String> = r.get(3)?;
         Ok(MessageView {
