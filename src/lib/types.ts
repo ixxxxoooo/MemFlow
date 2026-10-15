@@ -63,6 +63,13 @@ export interface Settings {
   queryRewrite: boolean;
   numCtx: number;
   docAiEnrich: boolean;
+  /** 文本模型来源:ollama 本地 / openai_compat 云端 */
+  llmProvider: "ollama" | "openai_compat";
+  llmPreset: string;
+  llmBaseUrl: string;
+  llmModel: string;
+  /** 直连下载使用的模型仓库地址(可换镜像) */
+  modelRegistry: string;
 }
 
 export interface Stats {
@@ -89,6 +96,8 @@ export interface ModelNeed {
   name: string;
   installed: boolean;
   required: boolean;
+  /** 本地 Ollama 模型(云端模型为 false,不可下载) */
+  local: boolean;
 }
 
 export interface AppStatus {
@@ -101,6 +110,8 @@ export interface AppStatus {
   settings: Settings;
   dataDir: string;
   vectorCount: number;
+  /** 是否已配置云端 API Key(密钥不会返回前端) */
+  hasApiKey: boolean;
 }
 
 export interface TagCount {

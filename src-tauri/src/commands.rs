@@ -5,6 +5,7 @@ use crate::chat::{self, ChatEvent};
 use crate::core::{CancelToken, Core};
 use crate::error::{AppError, Result};
 use crate::ingest::{self, CaptureInput, CaptureResult};
+use crate::model_fetch;
 use crate::ollama::{self, PullProgress};
 use crate::pipeline::model_installed;
 use crate::queue::{self, QueueStatus};
@@ -33,6 +34,8 @@ pub struct ModelNeed {
     pub name: String,
     pub installed: bool,
     pub required: bool,
+    /// 是否为本地 Ollama 模型(云端模型此项为 false,不可下载)
+    pub local: bool,
 }
 
 /// 应用整体状态
@@ -48,6 +51,8 @@ pub struct AppStatus {
     pub settings: Settings,
     pub data_dir: String,
     pub vector_count: usize,
+    /// 是否已配置云端 API Key(密钥本身不会返回前端)
+    pub has_api_key: bool,
 }
 
 /// 记录详情
@@ -76,26 +81,38 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
     } else {
         vec![]
     };
-    let models = vec![
-        ModelNeed {
-            role: "向量模型".into(),
-            name: settings.embed_model.clone(),
-            installed: model_installed(&installed, &settings.embed_model),
+    let cloud = settings.uses_cloud_llm();
+    let mut models = vec![ModelNeed {
+        role: "向量模型".into(),
+        name: settings.embed_model.clone(),
+        installed: model_installed(&installed, &settings.embed_model),
+        required: true,
+        local: true,
+    }];
+    if cloud {
+        models.push(ModelNeed {
+            role: "文本模型(云端)".into(),
+            name: settings.llm_model.clone(),
+            installed: core.has_api_key(),
             required: true,
-        },
-        ModelNeed {
+            local: false,
+        });
+    } else {
+        models.push(ModelNeed {
             role: "文本模型".into(),
             name: settings.text_model.clone(),
             installed: model_installed(&installed, &settings.text_model),
             required: true,
-        },
-        ModelNeed {
-            role: "视觉模型".into(),
-            name: settings.vision_model.clone(),
-            installed: model_installed(&installed, &settings.vision_model),
-            required: settings.vision_enabled,
-        },
-    ];
+            local: true,
+        });
+    }
+    models.push(ModelNeed {
+        role: "视觉模型".into(),
+        name: settings.vision_model.clone(),
+        installed: model_installed(&installed, &settings.vision_model),
+        required: settings.vision_enabled,
+        local: true,
+    });
     let stats = core.db.with(|c| repo::stats(c, &settings.embed_model))?;
     Ok(AppStatus {
         ollama_running: running,
@@ -106,6 +123,7 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
         queue: queue::queue_status(&core)?,
         data_dir: core.paths.root.to_string_lossy().into_owned(),
         vector_count: core.vindex.len(),
+        has_api_key: core.has_api_key(),
         settings,
     })
 }
@@ -118,37 +136,116 @@ pub async fn ollama_start(core: S<'_>) -> Result<()> {
     Ok(())
 }
 
-/// 拉取模型(流式进度)
+/// 占用"同一时间只允许一个下载"的名额
+fn acquire_pull_token() -> Result<CancelToken> {
+    let token = CancelToken::default();
+    let mut g = PULL_TOKEN.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    if g.is_some() {
+        return Err(AppError::Invalid(
+            "已有模型正在下载,请等待完成或先取消".into(),
+        ));
+    }
+    *g = Some(token.clone());
+    Ok(token)
+}
+
+/// 释放下载名额
+fn release_pull_token() {
+    if let Some(m) = PULL_TOKEN.get() {
+        *m.lock().unwrap() = None;
+    }
+}
+
+/// 校验模型名
+fn check_model_name(name: &str) -> Result<String> {
+    let name = name.trim().to_string();
+    if name.is_empty() || name.len() > 100 || name.chars().any(|c| c.is_whitespace()) {
+        return Err(AppError::Invalid("模型名不合法".into()));
+    }
+    Ok(name)
+}
+
+/// 拉取模型(经由 Ollama 服务端,流式进度)
 #[tauri::command]
 pub async fn pull_model(
     core: S<'_>,
     name: String,
     on_progress: Channel<PullProgress>,
 ) -> Result<()> {
-    let name = name.trim().to_string();
-    if name.is_empty() || name.len() > 100 || name.chars().any(|c| c.is_whitespace()) {
-        return Err(AppError::Invalid("模型名不合法".into()));
-    }
-    let token = CancelToken::default();
-    {
-        let mut g = PULL_TOKEN.get_or_init(|| Mutex::new(None)).lock().unwrap();
-        if g.is_some() {
-            return Err(AppError::Invalid(
-                "已有模型正在下载,请等待完成或先取消".into(),
-            ));
-        }
-        *g = Some(token.clone());
-    }
+    let name = check_model_name(&name)?;
+    let token = acquire_pull_token()?;
     let r = core
         .ollama()
         .pull(&name, &token.0, |p| {
             let _ = on_progress.send(p);
         })
         .await;
-    *PULL_TOKEN.get().unwrap().lock().unwrap() = None;
+    release_pull_token();
     r?;
     core.wake.notify_one();
     Ok(())
+}
+
+/// 直连下载模型(绕过 Ollama 服务端的重定向检查,适用于代理 fake-ip 环境)
+#[tauri::command]
+pub async fn pull_model_direct(
+    core: S<'_>,
+    name: String,
+    on_progress: Channel<PullProgress>,
+) -> Result<()> {
+    let name = check_model_name(&name)?;
+    let token = acquire_pull_token()?;
+    let registry = core.settings().model_registry;
+    let r = model_fetch::pull_direct(
+        &core.cloud_http(),
+        &registry,
+        &model_fetch::default_models_root(),
+        &name,
+        &token.0,
+        |p| {
+            let _ = on_progress.send(p);
+        },
+    )
+    .await;
+    release_pull_token();
+    r?;
+    core.wake.notify_one();
+    Ok(())
+}
+
+/// 保存云端 API Key 到系统钥匙串(传空串表示清除)
+#[tauri::command]
+pub fn set_llm_api_key(core: S<'_>, key: String) -> Result<()> {
+    if key.len() > 400 {
+        return Err(AppError::Invalid("API Key 过长".into()));
+    }
+    core.set_api_key(&key)?;
+    queue::emit_status(&core);
+    Ok(())
+}
+
+/// 测试云端模型连接(使用界面上尚未保存的地址与模型;key 为空则用已保存的密钥)
+#[tauri::command]
+pub async fn test_llm_connection(
+    core: S<'_>,
+    base_url: String,
+    model: String,
+    key: Option<String>,
+) -> Result<String> {
+    let base = base_url.trim();
+    if !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Err(AppError::Invalid(
+            "云端接口地址必须以 http:// 或 https:// 开头".into(),
+        ));
+    }
+    if model.trim().is_empty() {
+        return Err(AppError::Invalid("云端模型名不能为空".into()));
+    }
+    let key = key
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| core.api_key())
+        .unwrap_or_default();
+    core.cloud_client(base, &key).ping(model.trim()).await
 }
 
 /// 取消模型拉取

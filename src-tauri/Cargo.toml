@@ -24,7 +24,9 @@ window-vibrancy = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+# native-tls 在 macOS 使用系统 Security.framework,信任系统钥匙串里的证书(含代理工具的 MITM 证书);
+# macos-system-configuration 让云端请求遵循系统代理设置
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls", "macos-system-configuration"] }
 futures-util = "0.3"
 rusqlite = { version = "0.37", features = ["bundled"] }
 jieba-rs = "0.7"
@@ -38,6 +40,10 @@ regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.22"
+
+# API Key 存系统钥匙串(仅 macOS)
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
 
 [dev-dependencies]
 tempfile = "3"

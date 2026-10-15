@@ -9,12 +9,16 @@ pub mod db;
 pub mod error;
 pub mod extract;
 pub mod ingest;
+pub mod llm;
+pub mod model_fetch;
 pub mod ollama;
+pub mod openai;
 pub mod pipeline;
 pub mod prompts;
 pub mod queue;
 pub mod repo;
 pub mod retrieval;
+pub mod secrets;
 pub mod settings;
 pub mod tokenizer;
 pub mod vector;
@@ -82,6 +86,9 @@ pub fn run() {
             commands::app_status,
             commands::ollama_start,
             commands::pull_model,
+            commands::pull_model_direct,
+            commands::set_llm_api_key,
+            commands::test_llm_connection,
             commands::cancel_pull,
             commands::get_settings,
             commands::update_settings,

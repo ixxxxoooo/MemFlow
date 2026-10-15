@@ -32,7 +32,22 @@ pub struct Settings {
     pub num_ctx: u32,
     /// 导入文档时是否自动 AI 解读(默认关闭:文档只做快速索引)
     pub doc_ai_enrich: bool,
+    /// 文本模型来源:ollama(本地)或 openai_compat(OpenAI 兼容云端,如 DeepSeek)
+    pub llm_provider: String,
+    /// 云端预设标识(仅用于界面回显,如 deepseek / custom)
+    pub llm_preset: String,
+    /// 云端接口根地址(含版本路径,实际请求 `{base}/chat/completions`)
+    pub llm_base_url: String,
+    /// 云端文本模型名
+    pub llm_model: String,
+    /// 直连下载使用的 Ollama 模型仓库地址(可换成镜像)
+    pub model_registry: String,
 }
+
+/// 文本模型来源:本地 Ollama
+pub const PROVIDER_OLLAMA: &str = "ollama";
+/// 文本模型来源:OpenAI 兼容云端
+pub const PROVIDER_OPENAI: &str = "openai_compat";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -49,11 +64,30 @@ impl Default for Settings {
             query_rewrite: true,
             num_ctx: 8192,
             doc_ai_enrich: false,
+            llm_provider: PROVIDER_OLLAMA.into(),
+            llm_preset: "deepseek".into(),
+            llm_base_url: "https://api.deepseek.com".into(),
+            llm_model: "deepseek-chat".into(),
+            model_registry: "https://registry.ollama.ai".into(),
         }
     }
 }
 
 impl Settings {
+    /// 文本类调用是否使用云端模型
+    pub fn uses_cloud_llm(&self) -> bool {
+        self.llm_provider == PROVIDER_OPENAI
+    }
+
+    /// 当前生效的文本模型名(云端模式取云端模型名,否则取本地文本模型)
+    pub fn active_text_model(&self) -> &str {
+        if self.uses_cloud_llm() {
+            &self.llm_model
+        } else {
+            &self.text_model
+        }
+    }
+
     /// 校验设置合法性
     ///
     /// 返回: 合法返回 Ok,否则返回带说明的 Invalid 错误
@@ -70,6 +104,30 @@ impl Settings {
         ] {
             if v.trim().is_empty() {
                 return Err(AppError::Invalid(format!("{name}不能为空")));
+            }
+        }
+        if self.llm_provider != PROVIDER_OLLAMA && self.llm_provider != PROVIDER_OPENAI {
+            return Err(AppError::Invalid(
+                "文本模型来源只能是 ollama 或 openai_compat".into(),
+            ));
+        }
+        if !(self.model_registry.starts_with("http://")
+            || self.model_registry.starts_with("https://"))
+        {
+            return Err(AppError::Invalid(
+                "模型仓库地址必须以 http:// 或 https:// 开头".into(),
+            ));
+        }
+        if self.uses_cloud_llm() {
+            if !(self.llm_base_url.starts_with("http://")
+                || self.llm_base_url.starts_with("https://"))
+            {
+                return Err(AppError::Invalid(
+                    "云端接口地址必须以 http:// 或 https:// 开头".into(),
+                ));
+            }
+            if self.llm_model.trim().is_empty() {
+                return Err(AppError::Invalid("云端模型名不能为空".into()));
             }
         }
         if !(0.0..=1.0).contains(&self.score_threshold) {
@@ -105,6 +163,28 @@ mod tests {
     #[test]
     fn 默认设置合法() {
         assert!(Settings::default().validate().is_ok());
+    }
+
+    #[test]
+    fn 云端模式校验必填项() {
+        let ok = Settings {
+            llm_provider: PROVIDER_OPENAI.into(),
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+        assert_eq!(ok.active_text_model(), "deepseek-chat");
+        let bad = Settings {
+            llm_provider: PROVIDER_OPENAI.into(),
+            llm_model: " ".into(),
+            ..Settings::default()
+        };
+        assert!(bad.validate().is_err());
+        let bad = Settings {
+            llm_provider: "foo".into(),
+            ..Settings::default()
+        };
+        assert!(bad.validate().is_err());
+        assert_eq!(Settings::default().active_text_model(), "qwen2.5:7b");
     }
 
     #[test]

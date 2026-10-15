@@ -20,7 +20,8 @@
 ## 特性
 
 - **闪念胶囊**:全局快捷键(默认 `Cmd+Shift+K`)唤起 Spotlight 风格输入框;回车保存、`Cmd+V` 粘贴截图、拖入文件;失焦自动收起,托盘常驻。
-- **全本地**:嵌入 `bge-m3`、文本 `qwen2.5:7b`、视觉 `minicpm-v`(默认关闭),数据与推理都不出本机。
+- **全本地(默认)**:嵌入 `bge-m3`、文本 `qwen2.5:7b`、视觉 `minicpm-v`(默认关闭),数据与推理都不出本机。
+- **可选云端文本模型**:设置里可切换到 DeepSeek 等 OpenAI 兼容接口,向量化与原始数据仍留在本机(见下文隐私说明)。
 - **混合检索**:向量 + FTS5(jieba 中文分词)→ RRF 融合 → 时效加权 → 相关度门槛。
 - **可溯源问答**:只依据你的记录回答,`[n]` 角标可点击,右侧抽屉查看原文;无相关资料时直接拒答,不编造。
 - **Mermaid 流程图**:校验 → 自动修复 → 缩放拖拽 → 导出 SVG/PNG。
@@ -48,12 +49,22 @@
 
 1. 安装并启动 [Ollama](https://ollama.com)。
 2. 打开 MemFlow,顶部横幅会提示缺失的模型,点击「一键下载」(`bge-m3` 约 1.2GB,`qwen2.5:7b` 约 4.7GB)。
-   - 若系统代理使用 fake-ip(`198.18.x.x`)导致 `ollama pull` 报 `redirect target not allowed`,可用 [`scripts/pull_model_manual.sh`](scripts/pull_model_manual.sh) 手动拉取:
+   - 若系统代理(如 Quantumult X)使用 fake-ip(`198.18.x.x`)导致 `ollama pull` 报 `redirect target not allowed`,在「设置 → 模型状态与下载」点「**直连下载**」即可;也可用终端脚本 [`scripts/pull_model_manual.sh`](scripts/pull_model_manual.sh):
      ```bash
-     scripts/pull_model_manual.sh bge-m3 latest
-     scripts/pull_model_manual.sh qwen2.5 7b
+     scripts/pull_model_manual.sh qwen2.5:7b
+     scripts/pull_model_manual.sh bge-m3
+     # 网络受限时可指定镜像仓库
+     OLLAMA_REGISTRY=https://你的镜像地址 scripts/pull_model_manual.sh qwen2.5:7b
      ```
 3. 按 `Cmd+Shift+K` 记下第一条想法,然后到「AI 问答」里提问。
+
+### 使用云端模型(可选)
+
+在「设置 → 文本模型来源」选择「云端 API」,挑选服务商预设(如 DeepSeek),填入 API Key,点「测试连接」后保存即可。
+
+- 只有问答、查询改写、自动打标签、流程图修复使用云端模型;**向量化与图片解析始终使用本地 Ollama**(DeepSeek 官方没有 embedding 接口)。
+- **隐私**:云端模式下,你的提问与检索到的资料片段会发送给所选服务商;原始数据和向量索引仍只保存在本机。资料敏感时请使用本地模型。
+- API Key 保存在 macOS 钥匙串,不写入数据库,也不会包含在备份中。
 
 ## 从源码构建
 

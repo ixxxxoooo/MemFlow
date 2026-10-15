@@ -4,8 +4,11 @@
 
 use crate::db::Db;
 use crate::error::Result;
+use crate::llm::LlmClient;
 use crate::ollama::{build_http, GenOptions, OllamaClient};
+use crate::openai::{build_cloud_http, OpenAiClient};
 use crate::repo;
+use crate::secrets;
 use crate::settings::Settings;
 use crate::vector::VectorIndex;
 use serde_json::Value;
@@ -93,6 +96,10 @@ pub struct Core {
     pub vindex: VectorIndex,
     settings: RwLock<Settings>,
     http: reqwest::Client,
+    /// 云端模型专用 HTTP 客户端(遵循系统代理)
+    cloud_http: reqwest::Client,
+    /// API Key 缓存:外层 None 表示尚未读取过钥匙串
+    api_key: Mutex<Option<Option<String>>>,
     sink: Arc<dyn EventSink>,
     /// 唤醒后台 Worker
     pub wake: Notify,
@@ -130,6 +137,8 @@ impl Core {
             db,
             vindex: VectorIndex::new(),
             http: build_http(),
+            cloud_http: build_cloud_http(),
+            api_key: Mutex::new(None),
             settings: RwLock::new(settings.clone()),
             sink,
             wake: Notify::new(),
@@ -168,6 +177,76 @@ impl Core {
     /// 获取 Ollama 客户端(按当前设置的地址)
     pub fn ollama(&self) -> OllamaClient {
         OllamaClient::new(self.http.clone(), &self.settings().ollama_url)
+    }
+
+    /// 当前云端 API Key(首次访问时从钥匙串读取并缓存)
+    pub fn api_key(&self) -> Option<String> {
+        let mut g = self.api_key.lock().unwrap();
+        if g.is_none() {
+            *g = Some(secrets::load_api_key());
+        }
+        g.clone().flatten()
+    }
+
+    /// 是否已配置 API Key
+    pub fn has_api_key(&self) -> bool {
+        self.api_key().is_some()
+    }
+
+    /// 保存 API Key 到钥匙串并更新缓存;传入空串表示清除
+    ///
+    /// 参数: key 密钥
+    pub fn set_api_key(&self, key: &str) -> Result<()> {
+        secrets::save_api_key(key)?;
+        self.set_api_key_memory(key);
+        Ok(())
+    }
+
+    /// 仅更新内存缓存,不触碰钥匙串(测试使用)
+    #[doc(hidden)]
+    pub fn set_api_key_memory(&self, key: &str) {
+        let v = (!key.trim().is_empty()).then(|| key.trim().to_string());
+        *self.api_key.lock().unwrap() = Some(v);
+    }
+
+    /// 云端/下载用 HTTP 客户端(遵循系统代理,无总超时)
+    pub fn cloud_http(&self) -> reqwest::Client {
+        self.cloud_http.clone()
+    }
+
+    /// 构造指定地址的云端客户端(用于"测试连接",此时设置尚未保存)
+    ///
+    /// 参数: base 接口根地址;key 密钥
+    pub fn cloud_client(&self, base: &str, key: &str) -> OpenAiClient {
+        OpenAiClient::new(self.cloud_http.clone(), base, key)
+    }
+
+    /// 获取文本对话后端:云端模式走 OpenAI 兼容接口,否则走本地 Ollama
+    pub fn llm(&self) -> LlmClient {
+        let s = self.settings();
+        if s.uses_cloud_llm() {
+            let key = self.api_key().unwrap_or_default();
+            LlmClient::OpenAi(OpenAiClient::new(
+                self.cloud_http.clone(),
+                &s.llm_base_url,
+                &key,
+            ))
+        } else {
+            LlmClient::Ollama(self.ollama())
+        }
+    }
+
+    /// 当前文本类调用使用的模型名
+    pub fn text_model(&self) -> String {
+        self.settings().active_text_model().to_string()
+    }
+
+    /// 文本模型调度:仅本地 Ollama 需要处理内存驻留,云端模式直接跳过
+    pub async fn prepare_text_model(&self) {
+        let s = self.settings();
+        if !s.uses_cloud_llm() {
+            self.prepare_chat_model(&s.text_model).await;
+        }
     }
 
     /// 构造生成参数(num_ctx 全局一致,避免 Ollama 反复重载)

@@ -196,7 +196,6 @@ fn history_messages(msgs: &[repo::MessageView]) -> Vec<ChatMessage> {
 
 /// 改写追问为独立检索问句,失败则回退原问题
 async fn rewrite_query(core: &Core, history: &[ChatMessage], question: &str) -> String {
-    let s = core.settings();
     let hist_text = history
         .iter()
         .map(|m| {
@@ -210,8 +209,8 @@ async fn rewrite_query(core: &Core, history: &[ChatMessage], question: &str) -> 
         .join("\n");
     let msgs = prompts::rewrite_messages(&hist_text, question);
     match core
-        .ollama()
-        .chat(&s.text_model, &msgs, &core.gen_opts(0.0), None)
+        .llm()
+        .chat(&core.text_model(), &msgs, &core.gen_opts(0.0), None)
         .await
     {
         Ok(t) => {
@@ -269,7 +268,7 @@ pub async fn ask(
     let history = history_messages(&prior);
 
     // 检索
-    core.prepare_chat_model(&settings.text_model).await;
+    core.prepare_text_model().await;
     let search_q = if settings.query_rewrite && !history.is_empty() {
         rewrite_query(core, &history, q).await
     } else {
@@ -322,11 +321,11 @@ pub async fn ask(
     messages.extend(history);
     messages.push(ChatMessage::new("user", q));
 
-    let ollama = core.ollama();
+    let llm = core.llm();
     let mut partial = String::new();
-    let result = ollama
+    let result = llm
         .chat_stream(
-            &settings.text_model,
+            &core.text_model(),
             &messages,
             &core.gen_opts(0.3),
             &token.0,
@@ -381,12 +380,11 @@ pub async fn fix_mermaid(core: &Arc<Core>, code: &str, error: &str) -> Result<St
     let code: String = code.chars().take(6000).collect();
     let error: String = error.chars().take(600).collect();
     let _guard = core.chat_guard();
-    let s = core.settings();
-    core.prepare_chat_model(&s.text_model).await;
+    core.prepare_text_model().await;
     let msgs = prompts::mermaid_fix_messages(&code, &error);
     let text = core
-        .ollama()
-        .chat(&s.text_model, &msgs, &core.gen_opts(0.1), None)
+        .llm()
+        .chat(&core.text_model(), &msgs, &core.gen_opts(0.1), None)
         .await?;
     let fixed = strip_code_fence(&text).trim().to_string();
     // 兼容模型把 mermaid 语言标记写进首行的情况

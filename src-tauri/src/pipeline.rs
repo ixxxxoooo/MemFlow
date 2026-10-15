@@ -151,14 +151,14 @@ pub fn model_installed(installed: &[String], want: &str) -> bool {
 /// 返回: Some 为成功;None 表示重试后仍无法解析(降级)
 async fn extract_meta(
     core: &Core,
-    ollama: &OllamaClient,
     text: &str,
     time_label: &str,
     is_doc: bool,
     token: &CancelToken,
 ) -> Result<Option<ExtractedMeta>> {
-    let s = core.settings();
-    core.prepare_chat_model(&s.text_model).await;
+    core.prepare_text_model().await;
+    let llm = core.llm();
+    let text_model = core.text_model();
     let msgs = prompts::extract_messages(&sample_text(text, EXTRACT_INPUT_MAX), time_label, is_doc);
     let schema = prompts::extract_schema();
     for attempt in 0..3 {
@@ -166,8 +166,8 @@ async fn extract_meta(
             return Err(AppError::Cancelled);
         }
         let temp = if attempt == 0 { 0.1 } else { 0.4 };
-        match ollama
-            .chat_json::<ExtractedMeta>(&s.text_model, &msgs, &core.gen_opts(temp), &schema)
+        match llm
+            .chat_json::<ExtractedMeta>(&text_model, &msgs, &core.gen_opts(temp), &schema)
             .await
         {
             Ok(m) => return Ok(Some(clean_meta(m))),
@@ -339,15 +339,7 @@ pub async fn process_item(
     } else if !use_ai {
         Some(local_meta(&index_text))
     } else {
-        let m = extract_meta(
-            core,
-            &ollama,
-            &index_text,
-            &tl,
-            item.kind == "document",
-            token,
-        )
-        .await?;
+        let m = extract_meta(core, &index_text, &tl, item.kind == "document", token).await?;
         ai_used = m.is_some();
         m
     };
@@ -435,7 +427,7 @@ pub async fn process_item(
         } else if vision.is_some() {
             Some(s.vision_model.clone())
         } else {
-            Some(s.text_model.clone())
+            Some(s.active_text_model().to_string())
         },
         prompt_version: PROMPT_VERSION,
     };

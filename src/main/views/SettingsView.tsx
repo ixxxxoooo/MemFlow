@@ -5,9 +5,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
+import { findPreset, LLM_PRESETS } from "../../lib/llmPresets";
 import { eventToAccelerator, prettyAccelerator } from "../../lib/shortcut";
 import { useApp } from "../../lib/store";
 import type { Settings } from "../../lib/types";
+import { PullControls } from "../components/PullControls";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -28,17 +30,27 @@ export function SettingsView() {
   const [form, setForm] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [recording, setRecording] = useState(false);
+  // 云端 API Key 输入框内容:只在内存中短暂停留,保存后立即清空
+  const [keyInput, setKeyInput] = useState("");
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => { if (status && !form) setForm(status.settings); }, [status, form]);
   if (!form || !status) return <div className="p-8 text-sm text-[var(--fg-dim)]">加载中…</div>;
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setForm({ ...form, [k]: v });
-  const dirty = JSON.stringify(form) !== JSON.stringify(status.settings);
+  const dirty = JSON.stringify(form) !== JSON.stringify(status.settings) || keyInput.trim() !== "";
+  const settingsDirty = JSON.stringify(form) !== JSON.stringify(status.settings);
+  const cloud = form.llmProvider === "openai_compat";
+  const preset = findPreset(form.llmPreset);
   const embedChanged = form.embedModel !== status.settings.embedModel;
 
   const save = async () => {
     setSaving(true);
     try {
+      if (keyInput.trim()) {
+        await api.setLlmApiKey(keyInput.trim());
+        setKeyInput("");
+      }
       await api.updateSettings(form);
       toast("设置已保存", "ok");
       await refreshStatus();
@@ -47,6 +59,52 @@ export function SettingsView() {
       toast((e as Error).message, "err");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 切换到云端前提示隐私影响
+  const chooseProvider = async (p: Settings["llmProvider"]) => {
+    if (p === form.llmProvider) return;
+    if (p === "openai_compat") {
+      const ok = await confirmDialog(
+        "切换到云端模型后,你的提问内容和检索到的资料片段会发送给第三方服务商(如 DeepSeek)用于生成回答。\n\n向量索引与原始数据仍只保存在本机。确定要使用云端模型吗?",
+      );
+      if (!ok) return;
+    }
+    set("llmProvider", p);
+  };
+
+  const choosePreset = (id: string) => {
+    const p = findPreset(id);
+    setForm({
+      ...form,
+      llmPreset: id,
+      llmBaseUrl: p && p.baseUrl ? p.baseUrl : form.llmBaseUrl,
+      llmModel: p && p.model ? p.model : form.llmModel,
+    });
+  };
+
+  const testConn = async () => {
+    setTesting(true);
+    try {
+      const msg = await api.testLlmConnection(form.llmBaseUrl, form.llmModel, keyInput.trim() || null);
+      toast(msg, "ok");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const clearKey = async () => {
+    if (!(await confirmDialog("确定从钥匙串中删除已保存的 API Key 吗?"))) return;
+    try {
+      await api.setLlmApiKey("");
+      setKeyInput("");
+      toast("已清除 API Key", "ok");
+      await refreshStatus();
+    } catch (e) {
+      toast((e as Error).message, "err");
     }
   };
 
@@ -66,34 +124,95 @@ export function SettingsView() {
       <div data-tauri-drag-region className="flex h-[52px] shrink-0 items-center px-8">
         <h2 className="text-[15px] font-semibold" data-tauri-drag-region>设置</h2>
         <div className="flex-1" data-tauri-drag-region />
-        <button className="rounded-lg bg-[var(--accent)] px-4 py-1.5 text-xs font-medium text-[var(--on-accent)] disabled:opacity-40" disabled={!dirty || saving} onClick={() => void save()}>
+        <button className="btn btn-primary px-4" disabled={!dirty || saving} onClick={() => void save()}>
           {saving ? "保存中…" : "保存设置"}
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-8 pb-10">
         <div className="mx-auto max-w-[720px] space-y-7">
           <section>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">Ollama 与模型</h3>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">文本模型来源</h3>
             <div className="rounded-2xl border border-[var(--line)] px-5">
-              <Row label="服务地址" hint="本机 Ollama 的 REST 地址,所有数据只在本机处理。"><input className={inputCls} value={form.ollamaUrl} onChange={(e) => set("ollamaUrl", e.target.value)} /></Row>
+              <Row label="问答 / 打标签 / 流程图使用" hint="本地 Ollama 完全离线;云端 API 响应更快、效果更强,但提问与资料片段会发给服务商。向量化始终在本机完成。">
+                <div className="seg" role="group" aria-label="文本模型来源">
+                  <button aria-pressed={!cloud} onClick={() => void chooseProvider("ollama")}>本地 Ollama</button>
+                  <button aria-pressed={cloud} onClick={() => void chooseProvider("openai_compat")}>云端 API</button>
+                </div>
+              </Row>
+              {cloud ? (
+                <>
+                  <Row label="服务商" hint={preset?.keyUrl ? `预设会自动填入地址与默认模型。密钥申请:${preset.keyUrl}` : "任何兼容 OpenAI /chat/completions 的服务均可,选「自定义」手动填写。"}>
+                    <select className="select w-60" value={form.llmPreset} onChange={(e) => choosePreset(e.target.value)}>
+                      {LLM_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="接口地址" hint="含版本路径,实际请求 {地址}/chat/completions。"><input className={inputCls} value={form.llmBaseUrl} onChange={(e) => setForm({ ...form, llmBaseUrl: e.target.value, llmPreset: "custom" })} placeholder="https://api.deepseek.com" /></Row>
+                  <Row label="模型名" hint="DeepSeek 常用 deepseek-chat(通用)或 deepseek-reasoner(推理,更慢)。"><input className={inputCls} value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} placeholder="deepseek-chat" /></Row>
+                  <Row label="API Key" hint={status.hasApiKey ? "已保存在 macOS 钥匙串,不会写入数据库或备份。填写新值并保存即可替换。" : "保存在 macOS 钥匙串,不会写入数据库或备份。"}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        className={inputCls}
+                        value={keyInput}
+                        onChange={(e) => setKeyInput(e.target.value)}
+                        placeholder={status.hasApiKey ? "●●●●●●●●(已保存)" : "sk-..."}
+                      />
+                      {status.hasApiKey && <button className="btn btn-ghost btn-sm" onClick={() => void clearKey()}>清除</button>}
+                    </div>
+                  </Row>
+                  <Row label="连接测试" hint="使用上面填写的地址、模型与密钥发送一个极小请求(无需先保存)。">
+                    <button className="btn btn-secondary" disabled={testing || !form.llmBaseUrl || !form.llmModel || (!keyInput.trim() && !status.hasApiKey)} onClick={() => void testConn()}>{testing ? "测试中…" : "测试连接"}</button>
+                  </Row>
+                  <div className="my-3 rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--fg-dim)]">
+                    隐私提示:云端模式下,问题与检索到的资料片段会发送给所选服务商。若资料包含敏感信息,请使用本地 Ollama。
+                  </div>
+                </>
+              ) : (
+                <Row label="本地文本模型" hint="负责问答、摘要、打标签、流程图,如 qwen2.5:7b。下载见下方「本地模型」。"><input className={inputCls} value={form.textModel} onChange={(e) => set("textModel", e.target.value)} /></Row>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">本地模型(Ollama)</h3>
+            <div className="rounded-2xl border border-[var(--line)] px-5">
+              <Row label="服务地址" hint="本机 Ollama 的 REST 地址。向量化与图片解析始终在本机完成。"><input className={inputCls} value={form.ollamaUrl} onChange={(e) => set("ollamaUrl", e.target.value)} /></Row>
               <Row label="向量模型" hint={embedChanged ? "更换后旧向量不再参与检索,需全库重刷。" : "负责把文字转为向量,如 bge-m3、nomic-embed-text。"}><input className={inputCls} value={form.embedModel} onChange={(e) => set("embedModel", e.target.value)} /></Row>
-              <Row label="文本模型" hint="负责问答、摘要、打标签、流程图,如 qwen2.5:7b。"><input className={inputCls} value={form.textModel} onChange={(e) => set("textModel", e.target.value)} /></Row>
               <Row label="启用视觉解析" hint="图片自动 OCR + 描述 + 标签。需要先下载视觉模型,开启后可对旧图片重刷补齐。">
-                <input type="checkbox" className="h-4 w-4" checked={form.visionEnabled} onChange={(e) => set("visionEnabled", e.target.checked)} />
+                <input type="checkbox" className="switch" checked={form.visionEnabled} onChange={(e) => set("visionEnabled", e.target.checked)} />
               </Row>
               <Row label="导入文档时自动 AI 解读" hint="默认关闭:文档导入只做分块与向量索引,速度快,检索不受影响。开启后会额外调用文本模型生成摘要/标签(较慢);也可在文档弹窗里按需单独解读。">
-                <input type="checkbox" className="h-4 w-4" checked={form.docAiEnrich} onChange={(e) => set("docAiEnrich", e.target.checked)} />
+                <input type="checkbox" className="switch" checked={form.docAiEnrich} onChange={(e) => set("docAiEnrich", e.target.checked)} />
               </Row>
               <Row label="视觉模型" hint="推荐 minicpm-v(中文 OCR 强)或 qwen2.5vl。"><input className={inputCls} value={form.visionModel} onChange={(e) => set("visionModel", e.target.value)} /></Row>
               <Row label="模型常驻时长" hint="空闲多久后从内存卸载,如 5m、30s、1h、-1(常驻)。"><input className={`${inputCls} w-28`} value={form.keepAlive} onChange={(e) => set("keepAlive", e.target.value)} /></Row>
               <Row label="上下文长度" hint="所有请求保持一致,避免 Ollama 反复重载模型。内存紧张可调小。"><input type="number" className={`${inputCls} w-28`} value={form.numCtx} onChange={(e) => set("numCtx", Number(e.target.value))} /></Row>
+              <Row label="直连下载仓库" hint="「直连下载」使用的 Ollama 模型仓库地址,网络受限时可改成可访问的镜像。"><input className={inputCls} value={form.modelRegistry} onChange={(e) => set("modelRegistry", e.target.value)} /></Row>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--fg-dim)]">
+
+            <h3 className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">模型状态与下载</h3>
+            <div className="rounded-2xl border border-[var(--line)] px-5">
               {status.models.map((m) => (
-                <span key={m.name} className="rounded-full border border-[var(--line)] px-2.5 py-1">
-                  {m.role} {m.name}:{m.installed ? <span className="text-[var(--ok)]">已安装</span> : <span className={m.required ? "text-[var(--err)]" : ""}>{m.required ? "未安装" : "未安装(未启用)"}</span>}
-                </span>
+                <div key={`${m.role}-${m.name}`} className="flex items-center justify-between gap-4 border-b border-[var(--line)] py-3 last:border-0">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium">{m.role} · <span className="selectable">{m.name}</span></div>
+                    <div className="mt-0.5 text-xs">
+                      {!m.local
+                        ? (m.installed ? <span className="text-[var(--ok)]">云端模型 · 已配置密钥</span> : <span className="text-[var(--err)]">云端模型 · 未配置密钥</span>)
+                        : m.installed
+                          ? <span className="text-[var(--ok)]">已安装</span>
+                          : <span className={m.required ? "text-[var(--err)]" : "text-[var(--fg-dim)]"}>{m.required ? "未安装" : "未安装(未启用)"}</span>}
+                    </div>
+                  </div>
+                  {m.local && !m.installed && (
+                    <PullControls name={m.name} disabled={settingsDirty} disabledReason="请先保存设置,再下载当前填写的模型" />
+                  )}
+                </div>
               ))}
+              <div className="py-3 text-xs leading-relaxed text-[var(--fg-dim)]">
+                下载失败并提示 redirect target not allowed 或地址为 198.18.x.x,是代理开启了 fake-ip 导致的,请使用「直连下载」。也可在终端运行 scripts/pull_model_manual.sh。
+              </div>
             </div>
           </section>
 
@@ -104,7 +223,7 @@ export function SettingsView() {
                 <div className="flex items-center gap-3"><input type="range" min={0.1} max={0.8} step={0.01} value={form.scoreThreshold} onChange={(e) => set("scoreThreshold", Number(e.target.value))} /><span className="w-10 text-right text-xs">{form.scoreThreshold.toFixed(2)}</span></div>
               </Row>
               <Row label="引用资料条数" hint="每次问答最多带入多少条资料。"><input type="number" min={1} max={30} className={`${inputCls} w-24`} value={form.topK} onChange={(e) => set("topK", Number(e.target.value))} /></Row>
-              <Row label="追问时改写问题" hint="多轮对话中先把带指代的追问改写成完整问句再检索(多一次模型调用)。"><input type="checkbox" className="h-4 w-4" checked={form.queryRewrite} onChange={(e) => set("queryRewrite", e.target.checked)} /></Row>
+              <Row label="追问时改写问题" hint="多轮对话中先把带指代的追问改写成完整问句再检索(多一次模型调用)。"><input type="checkbox" className="switch" checked={form.queryRewrite} onChange={(e) => set("queryRewrite", e.target.checked)} /></Row>
             </div>
           </section>
 
@@ -113,7 +232,7 @@ export function SettingsView() {
             <div className="rounded-2xl border border-[var(--line)] px-5">
               <Row label="唤起闪念胶囊" hint="点击右侧后按下新的组合键(需包含 ⌘ / ⌥ / ⇧ 之一)。">
                 <button
-                  className={`min-w-[150px] rounded-lg border px-3 py-1.5 text-[13px] ${recording ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--line)] bg-[var(--bg-soft)]"}`}
+                  className={`btn min-w-[150px] text-[13px] ${recording ? "border-[var(--accent)] text-[var(--accent)]" : "btn-secondary bg-[var(--bg-soft)]"}`}
                   onClick={() => setRecording(true)}
                   onBlur={() => setRecording(false)}
                   onKeyDown={(e) => {
@@ -135,9 +254,9 @@ export function SettingsView() {
             <div className="rounded-2xl border border-[var(--line)] px-5">
               <Row label="数据位置" hint="单个 SQLite 文件 + 附件目录,拷走即可迁移。"><span className="selectable max-w-[260px] break-all text-xs text-[var(--fg-dim)]">{status.dataDir}</span></Row>
               <Row label="统计" hint={`向量索引已载入 ${status.vectorCount} 条`}><span className="text-xs text-[var(--fg-dim)]">{status.stats.notes} 记录 · {status.stats.images} 图片 · {status.stats.documents} 文档 · {status.stats.chunks} 切片</span></Row>
-              <Row label="备份数据" hint="导出数据库一致性快照与全部附件到所选文件夹。"><button className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs hover:bg-[var(--bg-soft)]" onClick={() => void backup()}>选择位置并备份</button></Row>
+              <Row label="备份数据" hint="导出数据库一致性快照与全部附件到所选文件夹。"><button className="btn btn-secondary" onClick={() => void backup()}>选择位置并备份</button></Row>
               <Row label="全库重刷" hint="用当前模型与提示词重新解析所有内容,旧索引在新结果就绪后才会被替换。">
-                <button className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs hover:bg-[var(--bg-soft)]" onClick={async () => {
+                <button className="btn btn-secondary" onClick={async () => {
                   if (!(await confirmDialog("确定对全部内容执行重刷吗?"))) return;
                   try { const n = await api.reindex(null); toast(`已加入 ${n} 项到重刷队列`, "ok"); bumpData(); void refreshStatus(); } catch (e) { toast((e as Error).message, "err"); }
                 }}>全库重刷</button>

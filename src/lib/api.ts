@@ -24,7 +24,18 @@ export const api = {
     ch.onmessage = onProgress;
     return call<void>("pull_model", { name, onProgress: ch });
   },
+  /** 直连下载:绕过 Ollama 服务端的重定向检查(代理 fake-ip 环境) */
+  pullModelDirect: (name: string, onProgress: (p: PullProgress) => void) => {
+    const ch = new Channel<PullProgress>();
+    ch.onmessage = onProgress;
+    return call<void>("pull_model_direct", { name, onProgress: ch });
+  },
   cancelPull: () => call<void>("cancel_pull"),
+  /** 保存云端 API Key 到系统钥匙串,空串表示清除 */
+  setLlmApiKey: (key: string) => call<void>("set_llm_api_key", { key }),
+  /** 测试云端连接;key 为空时使用已保存的密钥 */
+  testLlmConnection: (baseUrl: string, model: string, key: string | null) =>
+    call<string>("test_llm_connection", { baseUrl, model, key }),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (settings: Settings) => call<void>("update_settings", { settings }),
   captureSubmit: (text: string | null, paths: string[]) =>

@@ -3,7 +3,8 @@
 
 import { create } from "zustand";
 import { api } from "./api";
-import type { AppStatus, QueueStatus } from "./types";
+import { isFakeIpError } from "./llmPresets";
+import type { AppStatus, PullProgress, QueueStatus } from "./types";
 
 export type View = "chat" | "timeline" | "docs" | "settings";
 
@@ -21,6 +22,10 @@ interface AppState {
   /** 文档弹窗(预览/编辑);chunkId 用于定位被引用的切片 */
   docModal: { itemId: number; chunkId?: number } | null;
   toasts: ToastItem[];
+  /** 当前正在下载的模型(全局唯一,与后端"同时仅一个下载"一致) */
+  pull: { name: string; direct: boolean; progress: PullProgress | null } | null;
+  /** 普通下载被 fake-ip 拦截后,提示用户改用直连下载的模型名 */
+  pullHint: string | null;
   /** 数据变化计数,列表视图据此刷新 */
   dataVersion: number;
   setView: (v: View) => void;
@@ -32,6 +37,7 @@ interface AppState {
   openDocModal: (itemId: number, chunkId?: number) => void;
   closeDocModal: () => void;
   toast: (text: string, kind?: ToastItem["kind"]) => void;
+  startPull: (name: string, direct: boolean) => Promise<void>;
 }
 
 let toastSeq = 1;
@@ -43,6 +49,8 @@ export const useApp = create<AppState>((set, get) => ({
   drawer: null,
   docModal: null,
   toasts: [],
+  pull: null,
+  pullHint: null,
   dataVersion: 0,
   setView: (view) => set({ view }),
   setQueue: (queue) => set({ queue }),
@@ -63,5 +71,26 @@ export const useApp = create<AppState>((set, get) => ({
     const id = toastSeq++;
     set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }));
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "err" ? 6000 : 2800);
+  },
+  startPull: async (name, direct) => {
+    if (get().pull) return;
+    set({ pull: { name, direct, progress: null }, pullHint: null });
+    const onProgress = (progress: PullProgress) =>
+      set((s) => (s.pull ? { pull: { ...s.pull, progress } } : {}));
+    try {
+      await (direct ? api.pullModelDirect(name, onProgress) : api.pullModel(name, onProgress));
+      get().toast(`${name} 下载完成`, "ok");
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (!direct && isFakeIpError(msg)) {
+        set({ pullHint: name });
+        get().toast("下载被代理的 fake-ip 拦截,请点击「直连下载」重试", "err");
+      } else {
+        get().toast(`下载失败:${msg}`, "err");
+      }
+    } finally {
+      set({ pull: null });
+      void get().refreshStatus();
+    }
   },
 }));

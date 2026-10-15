@@ -21,6 +21,12 @@ pub enum AppError {
     /// Ollama 返回了业务错误
     #[error("Ollama 返回错误: {0}")]
     Ollama(String),
+    /// 云端模型不可用 / 鉴权失败 / 限流 / 网络超时(临时性,修复后自动恢复)
+    #[error("云端模型不可用: {0}")]
+    LlmUnavailable(String),
+    /// 云端模型返回了业务错误
+    #[error("云端模型返回错误: {0}")]
+    Llm(String),
     /// 模型输出或文件内容解析失败
     #[error("解析失败: {0}")]
     Parse(String),
@@ -39,13 +45,15 @@ pub enum AppError {
 pub type Result<T> = std::result::Result<T, AppError>;
 
 impl AppError {
-    /// 判断是否属于"临时不可用"(Ollama 没开 / 模型没装),此类错误重试不消耗次数
+    /// 判断是否属于"临时不可用"(Ollama 没开 / 模型没装 / 云端不可用),此类错误重试不消耗次数
     ///
     /// 返回: true 表示应延迟后重试且不计入失败次数
     pub fn is_unavailable(&self) -> bool {
         matches!(
             self,
-            AppError::OllamaUnavailable(_) | AppError::ModelMissing(_)
+            AppError::OllamaUnavailable(_)
+                | AppError::ModelMissing(_)
+                | AppError::LlmUnavailable(_)
         )
     }
 }
