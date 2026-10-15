@@ -69,20 +69,9 @@ pub struct ItemDetail {
 #[tauri::command]
 pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
     let settings = core.settings();
-    let client = core.ollama();
-    let (running, version) = match client.version().await {
-        Ok(v) => (true, Some(v)),
-        Err(_) => (false, None),
-    };
-    let installed: Vec<String> = if running {
-        client
-            .list_models()
-            .await
-            .map(|m| m.into_iter().map(|x| x.name).collect())
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
+    // 5 秒内复用探测结果,多处同时刷新状态也只访问一次 Ollama
+    let probe = core.probe_ollama(false).await;
+    let (running, version, installed) = (probe.running, probe.version, probe.installed);
     let cloud = settings.uses_cloud_llm();
     let mut models = vec![ModelNeed {
         role: "向量模型".into(),
@@ -140,6 +129,7 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
 #[tauri::command]
 pub async fn ollama_start(core: S<'_>) -> Result<()> {
     ollama::try_start_ollama(&core.ollama()).await?;
+    core.invalidate_probe();
     core.wake.notify_one();
     Ok(())
 }
@@ -189,6 +179,7 @@ pub async fn pull_model(
         })
         .await;
     release_pull_token();
+    core.invalidate_probe();
     r?;
     core.wake.notify_one();
     Ok(())
@@ -216,6 +207,7 @@ pub async fn pull_model_direct(
     )
     .await;
     release_pull_token();
+    core.invalidate_probe();
     r?;
     core.wake.notify_one();
     Ok(())

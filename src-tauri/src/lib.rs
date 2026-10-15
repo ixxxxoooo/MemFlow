@@ -14,6 +14,7 @@ pub mod layout;
 pub mod llm;
 pub mod logging;
 pub mod model_fetch;
+pub mod ocr_worker;
 pub mod ollama;
 pub mod openai;
 pub mod pdf_ingest;
@@ -77,6 +78,8 @@ pub fn run() {
                     }
                 });
             }
+            // 后台观察 Ollama 状态,变化时推送事件
+            tauri::async_runtime::spawn(core.clone().watch_ollama());
             tauri::async_runtime::spawn(queue::run_worker(core));
             windows::setup(app.handle(), &shortcut)?;
             Ok(())

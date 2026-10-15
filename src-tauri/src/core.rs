@@ -11,6 +11,7 @@ use crate::repo;
 use crate::secrets;
 use crate::settings::Settings;
 use crate::vector::VectorIndex;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -142,6 +143,20 @@ pub fn auto_import_concurrency() -> usize {
     (cores / 2).clamp(1, 4)
 }
 
+/// Ollama 探测结果(版本与已安装模型)
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaProbe {
+    pub running: bool,
+    pub version: Option<String>,
+    pub installed: Vec<String>,
+}
+
+/// 探测结果缓存时长:状态接口被多处高频调用,5 秒内复用
+const PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+/// 后台观察 Ollama 状态变化的间隔
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// 应用核心
 pub struct Core {
     pub paths: AppPaths,
@@ -155,6 +170,8 @@ pub struct Core {
     api_keys: Mutex<HashMap<String, Option<String>>>,
     /// 密钥是否存在的缓存(只查存在性,不读内容,不触发钥匙串授权)
     key_presence: Mutex<HashMap<String, bool>>,
+    /// Ollama 探测缓存:(地址, 时间, 结果)
+    probe_cache: Mutex<Option<(String, std::time::Instant, OllamaProbe)>>,
     /// 查询向量缓存(容量 64)
     pub query_vecs: Mutex<crate::query_cache::QueryCache>,
     sink: Arc<dyn EventSink>,
@@ -202,6 +219,7 @@ impl Core {
             cloud_http: build_cloud_http(),
             api_keys: Mutex::new(HashMap::new()),
             key_presence: Mutex::new(HashMap::new()),
+            probe_cache: Mutex::new(None),
             query_vecs: Mutex::new(crate::query_cache::QueryCache::new(64)),
             settings: RwLock::new(settings.clone()),
             sink,
@@ -242,6 +260,7 @@ impl Core {
         self.db
             .with(|c| repo::set_setting(c, "app", &serde_json::to_string(&new)?))?;
         *self.settings.write().unwrap() = new.clone();
+        self.invalidate_probe();
         if old.embed_model != new.embed_model {
             self.vindex.load_from_db(&self.db, &new.embed_model)?;
         }
@@ -250,6 +269,61 @@ impl Core {
             self.reranker.unload();
         }
         Ok(())
+    }
+
+    /// 探测 Ollama 状态与已安装模型;`force` 为 false 时 5 秒内复用缓存
+    pub async fn probe_ollama(&self, force: bool) -> OllamaProbe {
+        let url = self.settings().ollama_url;
+        if !force {
+            if let Some((u, at, p)) = self.probe_cache.lock().unwrap().as_ref() {
+                if *u == url && at.elapsed() < PROBE_TTL {
+                    return p.clone();
+                }
+            }
+        }
+        let client = self.ollama();
+        let probe = match client.version().await {
+            Ok(v) => OllamaProbe {
+                running: true,
+                version: Some(v),
+                installed: client
+                    .list_models()
+                    .await
+                    .map(|m| m.into_iter().map(|x| x.name).collect())
+                    .unwrap_or_default(),
+            },
+            Err(_) => OllamaProbe {
+                running: false,
+                version: None,
+                installed: vec![],
+            },
+        };
+        *self.probe_cache.lock().unwrap() = Some((url, std::time::Instant::now(), probe.clone()));
+        probe
+    }
+
+    /// 让探测缓存失效(拉取/启动/改地址后调用,下一次状态查询会重新探测)
+    pub fn invalidate_probe(&self) {
+        *self.probe_cache.lock().unwrap() = None;
+    }
+
+    /// 后台观察 Ollama 状态,仅在变化时推送 `ollama-status` 事件,前端据此刷新,
+    /// 这样前端不必高频轮询。
+    pub async fn watch_ollama(self: Arc<Self>) {
+        let mut last: Option<OllamaProbe> = None;
+        loop {
+            let p = self.probe_ollama(true).await;
+            if last.as_ref() != Some(&p) {
+                if last.is_some() {
+                    self.emit(
+                        "ollama-status",
+                        serde_json::to_value(&p).unwrap_or_default(),
+                    );
+                }
+                last = Some(p);
+            }
+            tokio::time::sleep(WATCH_INTERVAL).await;
+        }
     }
 
     /// 获取 Ollama 客户端(按当前设置的地址)

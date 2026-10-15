@@ -192,3 +192,9 @@ textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-se
 @media (prefers-color-scheme: dark) {
   .brand-mono { filter: invert(1); }
 }
+
+/* 屏幕外的长列表卡片跳过布局与绘制;预估高度避免滚动条跳动 */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}

@@ -63,6 +63,8 @@ async fn ingest_pdf(
     memflow_lib::repo::ItemView,
     Vec<memflow_lib::repo::ChunkView>,
 ) {
+    // 让 OCR 走与正式应用一致的"子进程"路径(测试程序自身不支持 --ocr-worker)
+    std::env::set_var("MEMFLOW_OCR_EXE", env!("CARGO_BIN_EXE_memflow"));
     let r = ingest::capture(
         core,
         CaptureInput {

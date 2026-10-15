@@ -33,6 +33,9 @@ mod ffi {
 pub struct PdfDoc {
     #[cfg(target_os = "macos")]
     handle: *mut std::os::raw::c_void,
+    /// 源文件路径(OCR 子进程需要自行打开)
+    #[cfg(target_os = "macos")]
+    path: std::path::PathBuf,
     /// 总页数
     pub page_count: usize,
 }
@@ -57,6 +60,7 @@ impl PdfDoc {
         }
         Some(PdfDoc {
             handle,
+            path: path.to_path_buf(),
             page_count: n as usize,
         })
     }
@@ -80,20 +84,27 @@ impl PdfDoc {
 
     /// 第 idx 页的 OCR 行
     ///
-    /// Vision 在多线程同时识别时会偶发失败,且各线程争抢神经引擎反而更慢,
-    /// 因此全进程串行执行 OCR,并在失败时重试一次。
+    /// 优先交给常驻的 OCR 子进程执行(见 `ocr_worker`):系统首次编译神经引擎模型时,
+    /// 同一进程内编译完成后的后续识别会一直失败,换新进程即可恢复,所以失败时重启子进程重试。
+    /// 子进程不可用时退回当前进程内直接识别。
     pub fn page_ocr_lines(&self, idx: usize) -> Result<Vec<OcrLine>> {
-        static OCR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = OCR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut json = None;
-        for _ in 0..2 {
-            json = Self::take_string(unsafe { ffi::mf_pdf_page_ocr_json(self.handle, idx as _) });
-            if json.is_some() {
-                break;
+        let json = match crate::ocr_worker::ocr_via_worker(&self.path, idx) {
+            crate::ocr_worker::WorkerResult::Json(j) => j,
+            crate::ocr_worker::WorkerResult::Failed => {
+                return Err(AppError::Parse(format!("第 {} 页 OCR 失败", idx + 1)))
             }
-        }
-        let json = json.ok_or_else(|| AppError::Parse(format!("第 {} 页 OCR 失败", idx + 1)))?;
+            crate::ocr_worker::WorkerResult::Unavailable => self
+                .ocr_json_direct(idx)
+                .ok_or_else(|| AppError::Parse(format!("第 {} 页 OCR 失败", idx + 1)))?,
+        };
         parse_ocr_json(&json)
+    }
+
+    /// 在当前进程内直接识别第 idx 页,返回 JSON 文本(进程内同一时刻只允许一个识别)
+    pub fn ocr_json_direct(&self, idx: usize) -> Option<String> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        Self::take_string(unsafe { ffi::mf_pdf_page_ocr_json(self.handle, idx as _) })
     }
 
     /// 第 idx 页渲染为 PNG(长边不超过 max_edge 像素)

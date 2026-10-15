@@ -47,6 +47,18 @@ export function TimelineView() {
   }, [kind, tag, debounced, toast]);
 
   useEffect(() => { void load(false); }, [load, dataVersion]);
+
+  // 滚动到底部哨兵时自动加载下一页(游标分页,不用一次渲染全部)
+  const sentinel = useRef<HTMLDivElement>(null);
+  const loadMore = useRef<() => void>(() => undefined);
+  loadMore.current = () => { if (hasMore && !loading) void load(true, items[items.length - 1]?.id); };
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) loadMore.current(); }, { rootMargin: "400px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, items.length]);
   useEffect(() => { api.listTags().then(setTags).catch(() => undefined); }, [dataVersion]);
 
   const groups = groupBy(items, (i) => fmtDayLabel(i.createdAt));
@@ -130,7 +142,7 @@ export function TimelineView() {
             </section>
           ))}
           {hasMore && (
-            <div className="flex justify-center py-4">
+            <div ref={sentinel} className="flex justify-center py-4">
               <button className="rounded-lg bg-[var(--bg-soft)] px-4 py-2 text-xs hover:bg-[var(--line)] disabled:opacity-50" disabled={loading} onClick={() => void load(true, items[items.length - 1]?.id)}>
                 {loading ? "加载中…" : "加载更多"}
               </button>

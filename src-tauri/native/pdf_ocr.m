@@ -118,7 +118,10 @@ char *mf_pdf_page_ocr_json(void *handle, long idx) {
         NSError *err = nil;
         BOOL ok = [handler performRequests:@[ req ] error:&err];
         CGImageRelease(img);
-        if (!ok) return NULL;
+        if (!ok) {
+            NSLog(@"[memflow] Vision OCR 失败: %@", err);
+            return NULL;
+        }
 
         NSMutableArray *lines = [NSMutableArray array];
         for (VNRecognizedTextObservation *o in req.results) {

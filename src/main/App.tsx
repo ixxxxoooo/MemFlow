@@ -22,12 +22,13 @@ export function App() {
   const { view, drawer, refreshStatus, setQueue, bumpData, itemsDeleted, toast, closeDrawer, closeDocModal } = useApp();
   const [dragging, setDragging] = useState(false);
 
-  // 订阅后端事件;定时轮询 Ollama 状态
+  // 订阅后端事件;Ollama 状态变化由后端推送,定时轮询只作兜底(30 秒)
   useEffect(() => {
     void refreshStatus();
-    const timer = setInterval(() => void refreshStatus(), 8000);
+    const timer = setInterval(() => void refreshStatus(), 30000);
     const unlistens: Promise<() => void>[] = [
       listen<QueueStatus>("queue-status", (e) => { setQueue(e.payload); }),
+      listen("ollama-status", () => { void refreshStatus(); }),
       listen("item-updated", () => { bumpData(); }),
       listen<{ id: number }>("item-deleted", (e) => { itemsDeleted([e.payload.id]); }),
     ];

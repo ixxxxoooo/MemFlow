@@ -1,6 +1,7 @@
 // @author ygw
 // 时间流卡片:记录 / 图片,带 AI 标签与处理状态
 
+import { memo } from "react";
 import { api } from "../../lib/api";
 import { fmtTime } from "../../lib/format";
 import { useApp } from "../../lib/store";
@@ -36,14 +37,15 @@ export function StatusChip({ item }: { item: Item }) {
   return null;
 }
 
-export function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: string) => void; selected?: boolean }) {
+/** memo:列表追加或抽屉切换时,props 未变的卡片不重渲染;cv-auto 让屏幕外的卡片跳过布局与绘制 */
+export const ItemCard = memo(function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: string) => void; selected?: boolean }) {
   const openDrawer = useApp((s) => s.openDrawer);
   const url = useAttachmentUrl(item.attachmentPath);
   const text = stripPageMarks(item.kind === "image" ? item.content || item.summary || "" : item.content);
   return (
     <div
       onClick={() => openDrawer(item.id)}
-      className={`group pop-in relative cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected ? "border-[var(--accent)]" : "border-[var(--line)]"}`}
+      className={`cv-auto group pop-in relative cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected ? "border-[var(--accent)]" : "border-[var(--line)]"}`}
     >
       <DeleteItemButton id={item.id} className="absolute right-2 top-2 z-10 bg-[var(--bg-elev)]/90 shadow-sm" />
       {item.kind === "image" && (
@@ -65,4 +67,4 @@ export function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: str
       </div>
     </div>
   );
-}
+});

@@ -13,8 +13,14 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// 让 OCR 走与正式应用一致的"子进程"路径(测试程序自身不支持 --ocr-worker)
+fn use_worker() {
+    std::env::set_var("MEMFLOW_OCR_EXE", env!("CARGO_BIN_EXE_memflow"));
+}
+
 /// OCR 并还原整页 Markdown
 fn ocr_markdown(name: &str) -> String {
+    use_worker();
     let doc = PdfDoc::open(&fixture(name)).expect("打开 PDF 失败");
     assert_eq!(doc.page_count, 1);
     let lines = doc.page_ocr_lines(0).expect("OCR 失败");

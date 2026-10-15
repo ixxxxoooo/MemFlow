@@ -3,11 +3,20 @@
 //!
 //! 个人知识库规模(十万切片以内)毫秒级返回,且不依赖任何 SQLite 扩展。
 //! 向量统一做 L2 归一化,余弦相似度即点积。
+//!
+//! 内存布局:每条记录的全部切片向量平铺在一块连续的 `Vec<f32>` 里(逐片步长为维度),
+//! 避免每个切片一次堆分配与指针跳转;检索用大小为 k 的小顶堆取 top-k(无需全量排序),
+//! 条目超过 `PARALLEL_THRESHOLD` 时用 rayon 并行扫描。
 
 use crate::db::Db;
 use crate::error::Result;
-use std::collections::HashMap;
+use rayon::prelude::*;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::RwLock;
+
+/// 超过该条目数时并行扫描
+const PARALLEL_THRESHOLD: usize = 20_000;
 
 /// 向量条目
 #[derive(Clone)]
@@ -29,13 +38,103 @@ pub struct VecHit {
     pub score: f32,
 }
 
+/// 一条记录的全部切片向量(平铺存储)
+struct Block {
+    /// 向量维度
+    dim: usize,
+    /// 各切片 id,与 `data` 按序对应
+    chunk_ids: Vec<i64>,
+    /// 平铺的向量数据,长度 = chunk_ids.len() * dim
+    data: Vec<f32>,
+}
+
+impl Block {
+    /// 由条目构建;以第一个合法条目的维度为准,维度不同的条目被丢弃
+    fn from_entries(entries: Vec<Entry>) -> Option<Self> {
+        let dim = entries.first()?.vec.len();
+        if dim == 0 {
+            return None;
+        }
+        let mut chunk_ids = Vec::with_capacity(entries.len());
+        let mut data = Vec::with_capacity(entries.len() * dim);
+        for e in entries {
+            if e.vec.len() != dim {
+                continue;
+            }
+            chunk_ids.push(e.chunk_id);
+            data.extend_from_slice(&e.vec);
+        }
+        Some(Self {
+            dim,
+            chunk_ids,
+            data,
+        })
+    }
+}
+
+/// 堆中的候选:按得分排序,得分相同按 chunk_id 保证结果稳定
+#[derive(Clone, Copy)]
+struct Cand {
+    score: f32,
+    chunk_id: i64,
+    item_id: i64,
+}
+
+impl PartialEq for Cand {
+    fn eq(&self, o: &Self) -> bool {
+        self.cmp(o) == Ordering::Equal
+    }
+}
+impl Eq for Cand {}
+impl PartialOrd for Cand {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Cand {
+    fn cmp(&self, o: &Self) -> Ordering {
+        self.score
+            .total_cmp(&o.score)
+            .then_with(|| o.chunk_id.cmp(&self.chunk_id))
+    }
+}
+
+/// 维护大小不超过 k 的小顶堆(堆顶是当前最差的候选)
+fn push_top_k(heap: &mut BinaryHeap<Reverse<Cand>>, c: Cand, k: usize) {
+    if heap.len() < k {
+        heap.push(Reverse(c));
+    } else if heap.peek().is_some_and(|worst| c > worst.0) {
+        heap.pop();
+        heap.push(Reverse(c));
+    }
+}
+
+/// 扫描一块记录,把候选并入堆
+fn scan_block(heap: &mut BinaryHeap<Reverse<Cand>>, item_id: i64, b: &Block, q: &[f32], k: usize) {
+    if b.dim != q.len() {
+        return;
+    }
+    for (i, row) in b.data.chunks_exact(b.dim).enumerate() {
+        let score: f32 = row.iter().zip(q).map(|(a, x)| a * x).sum();
+        push_top_k(
+            heap,
+            Cand {
+                score,
+                chunk_id: b.chunk_ids[i],
+                item_id,
+            },
+            k,
+        );
+    }
+}
+
 /// 索引内部数据
 #[derive(Default)]
 struct Inner {
     /// 当前索引对应的嵌入模型
     model: String,
     /// item_id -> 该记录的所有切片向量
-    items: HashMap<i64, Vec<Entry>>,
+    items: HashMap<i64, Block>,
 }
 
 /// 向量索引(线程安全)
@@ -97,7 +196,7 @@ impl VectorIndex {
     /// 参数: db 数据库;model 当前嵌入模型名
     /// 返回: 载入的向量条数
     pub fn load_from_db(&self, db: &Db, model: &str) -> Result<usize> {
-        let mut items: HashMap<i64, Vec<Entry>> = HashMap::new();
+        let mut grouped: HashMap<i64, Vec<Entry>> = HashMap::new();
         let mut count = 0usize;
         db.with_read(|c| {
             let mut stmt = c.prepare(
@@ -110,12 +209,16 @@ impl VectorIndex {
                 let (chunk_id, item_id, blob) = row?;
                 let vec = decode(&blob);
                 if is_valid(&vec) {
-                    items.entry(item_id).or_default().push(Entry { chunk_id, vec });
+                    grouped.entry(item_id).or_default().push(Entry { chunk_id, vec });
                     count += 1;
                 }
             }
             Ok(())
         })?;
+        let items: HashMap<i64, Block> = grouped
+            .into_iter()
+            .filter_map(|(id, es)| Block::from_entries(es).map(|b| (id, b)))
+            .collect();
         let mut g = self.inner.write().unwrap();
         g.model = model.to_string();
         g.items = items;
@@ -130,10 +233,13 @@ impl VectorIndex {
         if g.model != model {
             return;
         }
-        if entries.is_empty() {
-            g.items.remove(&item_id);
-        } else {
-            g.items.insert(item_id, entries);
+        match Block::from_entries(entries) {
+            Some(b) => {
+                g.items.insert(item_id, b);
+            }
+            None => {
+                g.items.remove(&item_id);
+            }
         }
     }
 
@@ -156,7 +262,7 @@ impl VectorIndex {
             .unwrap()
             .items
             .values()
-            .map(|v| v.len())
+            .map(|b| b.chunk_ids.len())
             .sum()
     }
 
@@ -176,27 +282,41 @@ impl VectorIndex {
         let mut q = query.to_vec();
         normalize(&mut q);
         let g = self.inner.read().unwrap();
-        let mut hits: Vec<VecHit> = Vec::new();
-        for (item_id, entries) in g.items.iter() {
-            for e in entries {
-                if e.vec.len() != q.len() {
-                    continue;
-                }
-                let score: f32 = e.vec.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
-                hits.push(VecHit {
-                    chunk_id: e.chunk_id,
-                    item_id: *item_id,
-                    score,
-                });
+        let total: usize = g.items.values().map(|b| b.chunk_ids.len()).sum();
+
+        let heap = if total >= PARALLEL_THRESHOLD {
+            // 并行:每个线程维护本地小顶堆,最后合并
+            let blocks: Vec<(&i64, &Block)> = g.items.iter().collect();
+            blocks
+                .par_iter()
+                .fold(BinaryHeap::new, |mut h, (id, b)| {
+                    scan_block(&mut h, **id, b, &q, k);
+                    h
+                })
+                .reduce(BinaryHeap::new, |mut a, b| {
+                    for Reverse(c) in b {
+                        push_top_k(&mut a, c, k);
+                    }
+                    a
+                })
+        } else {
+            let mut h = BinaryHeap::new();
+            for (id, b) in g.items.iter() {
+                scan_block(&mut h, *id, b, &q, k);
             }
-        }
-        hits.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        hits.truncate(k);
-        hits
+            h
+        };
+
+        // 小顶堆 -> 按得分降序
+        let mut out: Vec<Cand> = heap.into_iter().map(|Reverse(c)| c).collect();
+        out.sort_by(|a, b| b.cmp(a));
+        out.into_iter()
+            .map(|c| VecHit {
+                chunk_id: c.chunk_id,
+                item_id: c.item_id,
+                score: c.score,
+            })
+            .collect()
     }
 }
 
@@ -315,6 +435,99 @@ mod tests {
             let mb = (n * 1024 * 4) as f64 / 1024.0 / 1024.0;
             println!("N={n:>7}  单次检索 {ms:>7.1} ms  向量内存约 {mb:>6.0} MB");
         }
+    }
+
+    /// 朴素全量排序实现,作为 top-k 堆与并行路径的对照
+    fn naive(idx: &VectorIndex, q: &[f32], k: usize) -> Vec<(i64, f32)> {
+        let mut qn = q.to_vec();
+        normalize(&mut qn);
+        let g = idx.inner.read().unwrap();
+        let mut all: Vec<(i64, f32)> = Vec::new();
+        for b in g.items.values() {
+            for (i, row) in b.data.chunks_exact(b.dim).enumerate() {
+                all.push((
+                    b.chunk_ids[i],
+                    row.iter().zip(&qn).map(|(a, x)| a * x).sum(),
+                ));
+            }
+        }
+        all.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        all.truncate(k);
+        all
+    }
+
+    fn fill(idx: &VectorIndex, n: usize, dim: usize) {
+        idx.reset("m");
+        let mut seed: u32 = 777;
+        let mut next = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+        };
+        for i in 0..n {
+            // 每条记录 2 个切片,覆盖多切片平铺路径
+            let es: Vec<Entry> = (0..2)
+                .map(|j| Entry {
+                    chunk_id: (i * 2 + j) as i64,
+                    vec: unit(&(0..dim).map(|_| next()).collect::<Vec<_>>()),
+                })
+                .collect();
+            idx.replace_item("m", i as i64, es);
+        }
+    }
+
+    #[test]
+    fn 堆取topk与全量排序结果一致() {
+        let idx = VectorIndex::new();
+        fill(&idx, 500, 16);
+        let q: Vec<f32> = (0..16).map(|i| (i as f32).sin()).collect();
+        let got: Vec<(i64, f32)> = idx
+            .search(&q, 25)
+            .iter()
+            .map(|h| (h.chunk_id, h.score))
+            .collect();
+        let want = naive(&idx, &q, 25);
+        assert_eq!(got.len(), 25);
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(g.0, w.0);
+            assert!((g.1 - w.1).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn 超过阈值时并行路径结果一致() {
+        let idx = VectorIndex::new();
+        // 11_000 条记录 x 2 切片 = 22_000 > 阈值
+        fill(&idx, 11_000, 8);
+        assert!(idx.len() >= PARALLEL_THRESHOLD);
+        let q: Vec<f32> = (0..8).map(|i| (i as f32 * 0.7).cos()).collect();
+        let got: Vec<i64> = idx.search(&q, 30).iter().map(|h| h.chunk_id).collect();
+        let want: Vec<i64> = naive(&idx, &q, 30).iter().map(|x| x.0).collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn 替换与删除记录后检索同步() {
+        let idx = VectorIndex::new();
+        idx.reset("m");
+        idx.replace_item(
+            "m",
+            1,
+            vec![Entry {
+                chunk_id: 1,
+                vec: unit(&[1.0, 0.0]),
+            }],
+        );
+        idx.replace_item(
+            "m",
+            1,
+            vec![Entry {
+                chunk_id: 2,
+                vec: unit(&[1.0, 0.0]),
+            }],
+        );
+        assert_eq!(idx.search(&[1.0, 0.0], 5)[0].chunk_id, 2);
+        idx.remove_item(1);
+        assert!(idx.is_empty());
     }
 
     #[test]

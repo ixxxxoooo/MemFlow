@@ -107,6 +107,44 @@ fn date_of(ms: i64) -> String {
         .unwrap_or_default()
 }
 
+/// 去重阈值:字符二元组 Jaccard 相似度不低于该值视为近似重复
+const NEAR_DUP_JACCARD: f32 = 0.85;
+
+/// 取文本前 MAX_SOURCE_CHARS 个非空白字符的二元组集合
+fn bigrams(text: &str) -> std::collections::HashSet<(char, char)> {
+    let cs: Vec<char> = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .take(MAX_SOURCE_CHARS)
+        .collect();
+    cs.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// 过滤重复与近似重复的命中,保留靠前者,把预算留给不同的资料
+///
+/// 同一资料被重复导入、或相邻切片大段重叠时,会白白占用上下文并挤掉其它资料。
+///
+/// 参数: hits 已按相关性降序的命中
+/// 返回: 去重后的命中(顺序不变)
+pub fn dedup_hits(hits: Vec<Hit>) -> Vec<Hit> {
+    let mut kept: Vec<(Hit, std::collections::HashSet<(char, char)>)> = Vec::new();
+    for h in hits {
+        let g = bigrams(&h.text);
+        let dup = kept.iter().any(|(_, kg)| {
+            if g.is_empty() || kg.is_empty() {
+                return false;
+            }
+            let inter = g.intersection(kg).count() as f32;
+            let union = (g.len() + kg.len()) as f32 - inter;
+            union > 0.0 && inter / union >= NEAR_DUP_JACCARD
+        });
+        if !dup {
+            kept.push((h, g));
+        }
+    }
+    kept.into_iter().map(|(h, _)| h).collect()
+}
+
 /// 组装带编号的资料上下文(受总字符预算约束)
 ///
 /// 参数: hits 命中
@@ -409,6 +447,8 @@ pub async fn ask(
         return Ok(());
     }
 
+    // 先去掉重复/近似重复的资料,再按字符预算截取
+    let hits = dedup_hits(hits);
     let (context, used) = build_context(&hits);
     let sources = to_sources(&hits[..used]);
     emit(ChatEvent::Sources {
@@ -528,6 +568,25 @@ mod tests {
         assert!(!needs_rewrite(
             "What did I write about the quarterly budget meeting last week"
         ));
+    }
+
+    #[test]
+    fn 去重_相同或近似重复的资料只保留靠前的一条() {
+        let mut a = hit("note", "今天和老王聊了A项目,他说下个月预算会缩减20%");
+        a.chunk_id = 1;
+        let mut b = hit("note", "今天和老王聊了A项目,他说下个月预算会缩减20%。");
+        b.chunk_id = 2; // 仅末尾标点不同
+        let mut c = hit("note", "完全不同的内容:周五要提交季度报表并同步给财务");
+        c.chunk_id = 3;
+        let out = dedup_hits(vec![a, b, c]);
+        let ids: Vec<i64> = out.iter().map(|h| h.chunk_id).collect();
+        assert_eq!(ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn 去重_空文本不被误删() {
+        let out = dedup_hits(vec![hit("image", ""), hit("image", "")]);
+        assert_eq!(out.len(), 2);
     }
 
     fn hit_id(id: i64) -> Hit {
