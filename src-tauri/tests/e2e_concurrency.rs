@@ -120,6 +120,7 @@ async fn put_many(core: &Arc<Core>, n: usize) -> Vec<i64> {
             CaptureInput {
                 text: Some(format!("并发测试记录第{i}条:今天讨论了方案{i}与预算{i}")),
                 paths: vec![],
+                ..Default::default()
             },
         )
         .await

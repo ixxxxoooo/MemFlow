@@ -169,6 +169,7 @@ async fn setup(url: &str) -> (Arc<Core>, tempfile::TempDir) {
         CaptureInput {
             text: Some("今天和老王聊了A项目,他说下个月预算会缩减20%".into()),
             paths: vec![],
+            ..Default::default()
         },
     )
     .await

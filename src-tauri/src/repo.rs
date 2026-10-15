@@ -1,7 +1,7 @@
 // @author ygw
 //! 数据访问层:记录、元数据、切片、设置、对话的 SQL 封装。
 
-use crate::db::now_ms;
+use crate::db::{now_ms, DEFAULT_KB_ID};
 use crate::error::{AppError, Result};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub struct ItemView {
     pub id: i64,
     pub kind: String,
+    /// 所属知识库
+    pub kb_id: i64,
     pub title: Option<String>,
     /// 原文(列表场景为前 600 字的预览)
     pub content: String,
@@ -58,6 +60,8 @@ pub struct ItemFilter {
     pub search: Option<String>,
     pub before_id: Option<i64>,
     pub limit: Option<i64>,
+    /// 限定知识库(空 = 全部)
+    pub kb_id: Option<i64>,
 }
 
 /// 新建记录参数
@@ -70,6 +74,8 @@ pub struct NewItem {
     pub original_name: Option<String>,
     pub mime: Option<String>,
     pub content_hash: Option<String>,
+    /// 所属知识库;None 表示默认知识库
+    pub kb_id: Option<i64>,
 }
 
 /// 新建切片参数
@@ -130,6 +136,20 @@ pub struct SessionView {
     pub updated_at: i64,
     /// 该会话最近一次使用的对话模型引用
     pub model_ref: Option<String>,
+    /// 该会话限定的知识库范围(空 = 搜索全部)
+    pub kb_ids: Vec<i64>,
+}
+
+/// 知识库视图
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbView {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub created_at: i64,
+    /// 库内记录数
+    pub item_count: i64,
 }
 
 /// 对话消息
@@ -178,7 +198,7 @@ fn item_select(full_content: bool) -> String {
     format!(
         "SELECT i.id, i.kind, i.title, {content_expr}, length(i.content), i.attachment_path, i.original_name, i.mime, \
          i.status, i.error, i.created_at, i.updated_at, m.summary, m.category, m.tags, m.entities, m.vision_text, \
-         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id) \
+         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id), i.kb_id \
          FROM items i LEFT JOIN item_meta m ON m.item_id = i.id"
     )
 }
@@ -210,6 +230,7 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
         meta_model: r.get(17)?,
         prompt_version: r.get(18)?,
         chunk_count: r.get(19)?,
+        kb_id: r.get(20)?,
     })
 }
 
@@ -220,9 +241,19 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
 pub fn insert_item(c: &Connection, it: &NewItem) -> Result<i64> {
     let now = now_ms();
     c.execute(
-        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at) \
-         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8)",
-        params![it.kind, it.title, it.content, it.attachment_path, it.original_name, it.mime, it.content_hash, now],
+        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at,kb_id) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8,?9)",
+        params![
+            it.kind,
+            it.title,
+            it.content,
+            it.attachment_path,
+            it.original_name,
+            it.mime,
+            it.content_hash,
+            now,
+            it.kb_id.unwrap_or(DEFAULT_KB_ID)
+        ],
     )?;
     Ok(c.last_insert_rowid())
 }
@@ -280,6 +311,10 @@ pub fn list_items(c: &Connection, f: &ItemFilter) -> Result<Vec<ItemView>> {
         );
         args.push(q.to_lowercase().into());
     }
+    if let Some(kb) = f.kb_id {
+        sql.push_str(" AND i.kb_id = ?");
+        args.push(kb.into());
+    }
     if let Some(b) = f.before_id {
         sql.push_str(" AND i.id < ?");
         args.push(b.into());
@@ -293,12 +328,12 @@ pub fn list_items(c: &Connection, f: &ItemFilter) -> Result<Vec<ItemView>> {
 
 /// 按内容哈希查找已有记录(用于附件去重)
 ///
-/// 参数: c 连接;hash SHA-256;kind 记录类型
+/// 参数: c 连接;hash SHA-256;kind 记录类型;kb_id 知识库(去重只在库内进行)
 /// 返回: 已存在的记录 id
-pub fn find_by_hash(c: &Connection, hash: &str, kind: &str) -> Result<Option<i64>> {
+pub fn find_by_hash(c: &Connection, hash: &str, kind: &str, kb_id: i64) -> Result<Option<i64>> {
     Ok(c.query_row(
-        "SELECT id FROM items WHERE content_hash = ?1 AND kind = ?2 LIMIT 1",
-        params![hash, kind],
+        "SELECT id FROM items WHERE content_hash = ?1 AND kind = ?2 AND kb_id = ?3 LIMIT 1",
+        params![hash, kind, kb_id],
         |r| r.get(0),
     )
     .optional()?)
@@ -312,10 +347,11 @@ pub fn find_recent_duplicate_note(
     c: &Connection,
     content: &str,
     within_ms: i64,
+    kb_id: i64,
 ) -> Result<Option<i64>> {
     Ok(c.query_row(
-        "SELECT id FROM items WHERE kind='note' AND content = ?1 AND created_at > ?2 LIMIT 1",
-        params![content, now_ms() - within_ms],
+        "SELECT id FROM items WHERE kind='note' AND content = ?1 AND created_at > ?2 AND kb_id = ?3 LIMIT 1",
+        params![content, now_ms() - within_ms, kb_id],
         |r| r.get(0),
     )
     .optional()?)
@@ -436,22 +472,40 @@ pub fn list_chunks(c: &Connection, item_id: i64) -> Result<Vec<ChunkView>> {
 ///
 /// 参数: c 连接;embed_model 当前嵌入模型
 pub fn stats(c: &Connection, embed_model: &str) -> Result<Stats> {
-    let count = |sql: &str| -> rusqlite::Result<i64> { c.query_row(sql, [], |r| r.get(0)) };
+    stats_in(c, embed_model, None)
+}
+
+/// 统计信息(可限定知识库)
+///
+/// 参数: c 连接;embed_model 当前嵌入模型;kb_id 限定知识库(None = 全部)
+pub fn stats_in(c: &Connection, embed_model: &str, kb_id: Option<i64>) -> Result<Stats> {
+    // kb_id 为 -1 表示不过滤:所有查询统一带上 (?1 = -1 OR i.kb_id = ?1)
+    let kb = kb_id.unwrap_or(-1);
+    let count = |extra: &str| -> rusqlite::Result<i64> {
+        c.query_row(
+            &format!("SELECT count(*) FROM items i WHERE (?1 = -1 OR i.kb_id = ?1){extra}"),
+            [kb],
+            |r| r.get(0),
+        )
+    };
     Ok(Stats {
-        items: count("SELECT count(*) FROM items")?,
-        notes: count("SELECT count(*) FROM items WHERE kind='note'")?,
-        images: count("SELECT count(*) FROM items WHERE kind='image'")?,
-        documents: count("SELECT count(*) FROM items WHERE kind='document'")?,
-        chunks: count("SELECT count(*) FROM chunks")?,
-        stale_chunks: c.query_row(
-            "SELECT count(*) FROM chunks WHERE embed_model IS NULL OR embed_model != ?1",
-            [embed_model],
+        items: count("")?,
+        notes: count(" AND i.kind='note'")?,
+        images: count(" AND i.kind='image'")?,
+        documents: count(" AND i.kind='document'")?,
+        chunks: c.query_row(
+            "SELECT count(*) FROM chunks ch JOIN items i ON i.id = ch.item_id WHERE (?1 = -1 OR i.kb_id = ?1)",
+            [kb],
             |r| r.get(0),
         )?,
-        pending_items: count(
-            "SELECT count(*) FROM items WHERE status IN ('pending','processing')",
+        stale_chunks: c.query_row(
+            "SELECT count(*) FROM chunks ch JOIN items i ON i.id = ch.item_id \
+             WHERE (ch.embed_model IS NULL OR ch.embed_model != ?2) AND (?1 = -1 OR i.kb_id = ?1)",
+            params![kb, embed_model],
+            |r| r.get(0),
         )?,
-        failed_items: count("SELECT count(*) FROM items WHERE status = 'failed'")?,
+        pending_items: count(" AND i.status IN ('pending','processing')")?,
+        failed_items: count(" AND i.status = 'failed'")?,
     })
 }
 
@@ -508,7 +562,7 @@ pub fn create_session(c: &Connection, title: &str) -> Result<i64> {
 /// 列出会话(最近更新在前)
 pub fn list_sessions(c: &Connection) -> Result<Vec<SessionView>> {
     let mut stmt = c.prepare(
-        "SELECT id, title, updated_at, model_ref FROM chat_sessions ORDER BY updated_at DESC LIMIT 100",
+        "SELECT id, title, updated_at, model_ref, kb_ids FROM chat_sessions ORDER BY updated_at DESC LIMIT 100",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(SessionView {
@@ -516,6 +570,7 @@ pub fn list_sessions(c: &Connection) -> Result<Vec<SessionView>> {
             title: r.get(1)?,
             updated_at: r.get(2)?,
             model_ref: r.get(3)?,
+            kb_ids: parse_kb_ids(r.get::<_, Option<String>>(4)?.as_deref()),
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -569,6 +624,38 @@ pub fn set_session_model(c: &Connection, session_id: i64, model_ref: &str) -> Re
     Ok(())
 }
 
+/// 解析会话保存的知识库范围 JSON(损坏或为空时视为"全部")
+fn parse_kb_ids(s: Option<&str>) -> Vec<i64> {
+    s.and_then(|x| serde_json::from_str::<Vec<i64>>(x).ok())
+        .unwrap_or_default()
+}
+
+/// 记住会话限定的知识库范围(空 = 全部)
+pub fn set_session_kbs(c: &Connection, session_id: i64, kb_ids: &[i64]) -> Result<()> {
+    let json = if kb_ids.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(kb_ids)?)
+    };
+    c.execute(
+        "UPDATE chat_sessions SET kb_ids = ?2 WHERE id = ?1",
+        params![session_id, json],
+    )?;
+    Ok(())
+}
+
+/// 读取会话限定的知识库范围
+pub fn get_session_kbs(c: &Connection, session_id: i64) -> Result<Vec<i64>> {
+    let s: Option<Option<String>> = c
+        .query_row(
+            "SELECT kb_ids FROM chat_sessions WHERE id = ?1",
+            [session_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(parse_kb_ids(s.flatten().as_deref()))
+}
+
 /// 追加消息并刷新会话时间
 pub fn add_message(
     c: &Connection,
@@ -605,6 +692,171 @@ pub fn ensure_item_exists(c: &Connection, id: i64) -> Result<()> {
         return Err(AppError::Invalid(format!("记录 {id} 不存在")));
     }
     Ok(())
+}
+
+/// 校验并规整知识库名称
+fn clean_kb_name(name: &str) -> Result<String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Err(AppError::Invalid("知识库名称不能为空".into()));
+    }
+    if n.chars().count() > 40 {
+        return Err(AppError::Invalid("知识库名称不能超过 40 个字".into()));
+    }
+    Ok(n.to_string())
+}
+
+/// 把 SQLite 唯一约束错误转为友好提示
+fn kb_name_conflict(e: rusqlite::Error, name: &str) -> AppError {
+    match &e {
+        rusqlite::Error::SqliteFailure(f, _)
+            if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            AppError::Invalid(format!("已存在名为「{name}」的知识库"))
+        }
+        _ => e.into(),
+    }
+}
+
+/// 列出全部知识库(默认库在前,其余按创建顺序)及各库记录数
+pub fn list_kbs(c: &Connection) -> Result<Vec<KbView>> {
+    let mut stmt = c.prepare(
+        "SELECT k.id, k.name, k.description, k.created_at, \
+         (SELECT count(*) FROM items i WHERE i.kb_id = k.id) \
+         FROM knowledge_bases k ORDER BY k.id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(KbView {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            description: r.get(2)?,
+            created_at: r.get(3)?,
+            item_count: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 知识库是否存在
+pub fn kb_exists(c: &Connection, id: i64) -> Result<bool> {
+    let n: i64 = c.query_row(
+        "SELECT count(*) FROM knowledge_bases WHERE id = ?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// 校验知识库存在,不存在返回 Invalid
+pub fn ensure_kb_exists(c: &Connection, id: i64) -> Result<()> {
+    if !kb_exists(c, id)? {
+        return Err(AppError::Invalid(format!("知识库 {id} 不存在")));
+    }
+    Ok(())
+}
+
+/// 创建知识库
+///
+/// 参数: c 连接;name 名称(唯一,≤40 字);description 说明
+/// 返回: 新知识库 id
+pub fn create_kb(c: &Connection, name: &str, description: &str) -> Result<i64> {
+    let name = clean_kb_name(name)?;
+    c.execute(
+        "INSERT INTO knowledge_bases(name, description, created_at) VALUES(?1, ?2, ?3)",
+        params![name, description.trim(), now_ms()],
+    )
+    .map_err(|e| kb_name_conflict(e, &name))?;
+    Ok(c.last_insert_rowid())
+}
+
+/// 重命名知识库(可同时改说明)
+pub fn rename_kb(c: &Connection, id: i64, name: &str, description: Option<&str>) -> Result<()> {
+    ensure_kb_exists(c, id)?;
+    let name = clean_kb_name(name)?;
+    c.execute(
+        "UPDATE knowledge_bases SET name = ?2, description = COALESCE(?3, description) WHERE id = ?1",
+        params![id, name, description.map(str::trim)],
+    )
+    .map_err(|e| kb_name_conflict(e, &name))?;
+    Ok(())
+}
+
+/// 删除知识库行本身,并把会话范围里对它的引用移除
+///
+/// 调用方须先处理库内记录(转移到别的库或逐条删除);默认知识库不可删除。
+pub fn drop_kb_row(c: &Connection, id: i64) -> Result<()> {
+    if id == DEFAULT_KB_ID {
+        return Err(AppError::Invalid("默认知识库不能删除".into()));
+    }
+    ensure_kb_exists(c, id)?;
+    let left: i64 = c.query_row("SELECT count(*) FROM items WHERE kb_id = ?1", [id], |r| {
+        r.get(0)
+    })?;
+    if left > 0 {
+        return Err(AppError::Invalid("知识库内仍有记录,请先转移或删除".into()));
+    }
+    // 会话里引用了该库的范围,去掉这个 id
+    let sessions: Vec<(i64, Option<String>)> = {
+        let mut stmt =
+            c.prepare("SELECT id, kb_ids FROM chat_sessions WHERE kb_ids IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    for (sid, raw) in sessions {
+        let ids = parse_kb_ids(raw.as_deref());
+        if ids.contains(&id) {
+            let kept: Vec<i64> = ids.into_iter().filter(|x| *x != id).collect();
+            set_session_kbs(c, sid, &kept)?;
+        }
+    }
+    c.execute("DELETE FROM knowledge_bases WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// 列出某知识库内全部记录 id
+pub fn item_ids_in_kb(c: &Connection, kb_id: i64) -> Result<Vec<i64>> {
+    let mut stmt = c.prepare("SELECT id FROM items WHERE kb_id = ?1 ORDER BY id")?;
+    let rows = stmt.query_map([kb_id], |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 把记录转移到另一知识库(调用方应放在同一个事务中)
+///
+/// 同库内已有相同内容哈希的记录时,该条会被跳过以避免库内出现重复文件。
+///
+/// 参数: c 连接/事务;ids 记录 id;kb_id 目标知识库
+/// 返回: (实际转移的 id 列表, 因目标库已有同内容而跳过的 id 列表)
+pub fn move_items(c: &Connection, ids: &[i64], kb_id: i64) -> Result<(Vec<i64>, Vec<i64>)> {
+    ensure_kb_exists(c, kb_id)?;
+    let mut moved = Vec::new();
+    let mut skipped = Vec::new();
+    for &id in ids {
+        let Some((hash, kind, cur)): Option<(Option<String>, String, i64)> = c
+            .query_row(
+                "SELECT content_hash, kind, kb_id FROM items WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?
+        else {
+            continue;
+        };
+        if cur == kb_id {
+            continue;
+        }
+        if let Some(h) = hash.as_deref() {
+            if find_by_hash(c, h, &kind, kb_id)?.is_some() {
+                skipped.push(id);
+                continue;
+            }
+        }
+        c.execute(
+            "UPDATE items SET kb_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, kb_id, now_ms()],
+        )?;
+        moved.push(id);
+    }
+    Ok((moved, skipped))
 }
 
 /// 统计引用某附件路径的记录数(删除记录时判断能否删除文件)
@@ -798,5 +1050,136 @@ mod tests {
         assert!(msgs[1].sources.is_some());
         db.with(|c| delete_session(c, sid)).unwrap();
         assert!(db.with(|c| list_messages(c, sid)).unwrap().is_empty());
+    }
+
+    fn note_in(db: &Db, text: &str, kb: i64, hash: Option<&str>) -> i64 {
+        db.with(|c| {
+            insert_item(
+                c,
+                &NewItem {
+                    kind: "document".into(),
+                    content: text.into(),
+                    content_hash: hash.map(Into::into),
+                    kb_id: Some(kb),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn 知识库增删改与默认库保护() {
+        let db = Db::open_memory().unwrap();
+        let kbs = db.with(list_kbs).unwrap();
+        assert_eq!(kbs.len(), 1);
+        assert_eq!(kbs[0].id, DEFAULT_KB_ID);
+        let a = db.with(|c| create_kb(c, " 工作 ", "项目资料")).unwrap();
+        // 重名、空名、过长名均被拒绝
+        assert!(db.with(|c| create_kb(c, "工作", "")).is_err());
+        assert!(db.with(|c| create_kb(c, "  ", "")).is_err());
+        assert!(db.with(|c| create_kb(c, &"长".repeat(41), "")).is_err());
+        db.with(|c| rename_kb(c, a, "工作资料", None)).unwrap();
+        let kbs = db.with(list_kbs).unwrap();
+        assert_eq!(kbs[1].name, "工作资料");
+        assert_eq!(kbs[1].description, "项目资料");
+        // 默认库不可删除;有记录的库不能直接删
+        assert!(db.with(|c| drop_kb_row(c, DEFAULT_KB_ID)).is_err());
+        let it = note_in(&db, "x", a, None);
+        assert!(db.with(|c| drop_kb_row(c, a)).is_err());
+        db.with_tx(|tx| move_items(tx, &[it], DEFAULT_KB_ID).map(|_| ()))
+            .unwrap();
+        db.with(|c| drop_kb_row(c, a)).unwrap();
+        assert_eq!(db.with(list_kbs).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 列表与统计按知识库过滤() {
+        let db = Db::open_memory().unwrap();
+        let b = db.with(|c| create_kb(c, "B", "")).unwrap();
+        note_in(&db, "a1", DEFAULT_KB_ID, None);
+        note_in(&db, "b1", b, None);
+        note_in(&db, "b2", b, None);
+        let in_b = db
+            .with(|c| {
+                list_items(
+                    c,
+                    &ItemFilter {
+                        kb_id: Some(b),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(in_b.len(), 2);
+        assert!(in_b.iter().all(|i| i.kb_id == b));
+        let all = db.with(|c| list_items(c, &ItemFilter::default())).unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(db.with(|c| stats_in(c, "m", Some(b))).unwrap().items, 2);
+        assert_eq!(db.with(|c| stats_in(c, "m", None)).unwrap().items, 3);
+        let kbs = db.with(list_kbs).unwrap();
+        assert_eq!(kbs.iter().find(|k| k.id == b).unwrap().item_count, 2);
+    }
+
+    #[test]
+    fn 去重只在库内进行且转移时跳过同库重复() {
+        let db = Db::open_memory().unwrap();
+        let b = db.with(|c| create_kb(c, "B", "")).unwrap();
+        let a_item = note_in(&db, "同一个文件", DEFAULT_KB_ID, Some("h1"));
+        // 同哈希在另一个库不算重复
+        assert_eq!(
+            db.with(|c| find_by_hash(c, "h1", "document", b)).unwrap(),
+            None
+        );
+        let b_item = note_in(&db, "同一个文件", b, Some("h1"));
+        assert_eq!(
+            db.with(|c| find_by_hash(c, "h1", "document", b)).unwrap(),
+            Some(b_item)
+        );
+        // 把默认库那份转移进 B:B 已有同内容,被跳过且不改归属
+        let (moved, skipped) = db.with_tx(|tx| move_items(tx, &[a_item], b)).unwrap();
+        assert!(moved.is_empty());
+        assert_eq!(skipped, vec![a_item]);
+        let it = db.with(|c| get_item(c, a_item)).unwrap().unwrap();
+        assert_eq!(it.kb_id, DEFAULT_KB_ID);
+    }
+
+    #[test]
+    fn 转移到不存在的库会失败且不改动数据() {
+        let db = Db::open_memory().unwrap();
+        let it = note_in(&db, "x", DEFAULT_KB_ID, None);
+        assert!(db
+            .with_tx(|tx| move_items(tx, &[it], 999).map(|_| ()))
+            .is_err());
+        assert_eq!(
+            db.with(|c| get_item(c, it)).unwrap().unwrap().kb_id,
+            DEFAULT_KB_ID
+        );
+    }
+
+    #[test]
+    fn 会话范围保存读取且删库时移除引用() {
+        let db = Db::open_memory().unwrap();
+        let b = db.with(|c| create_kb(c, "B", "")).unwrap();
+        let sid = db.with(|c| create_session(c, "s")).unwrap();
+        assert!(db.with(|c| get_session_kbs(c, sid)).unwrap().is_empty());
+        db.with(|c| set_session_kbs(c, sid, &[DEFAULT_KB_ID, b]))
+            .unwrap();
+        assert_eq!(
+            db.with(|c| get_session_kbs(c, sid)).unwrap(),
+            vec![DEFAULT_KB_ID, b]
+        );
+        assert_eq!(
+            db.with(list_sessions).unwrap()[0].kb_ids,
+            vec![DEFAULT_KB_ID, b]
+        );
+        db.with(|c| drop_kb_row(c, b)).unwrap();
+        assert_eq!(
+            db.with(|c| get_session_kbs(c, sid)).unwrap(),
+            vec![DEFAULT_KB_ID]
+        );
+        // 清空范围 = 全部
+        db.with(|c| set_session_kbs(c, sid, &[])).unwrap();
+        assert!(db.with(|c| get_session_kbs(c, sid)).unwrap().is_empty());
     }
 }

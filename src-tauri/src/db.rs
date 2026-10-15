@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// 当前最新的数据库版本
-pub const LATEST_VERSION: i64 = 2;
+pub const LATEST_VERSION: i64 = 3;
 
 /// 只读连接池大小
 const READ_POOL_SIZE: usize = 4;
@@ -115,7 +115,25 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE chat_sessions ADD COLUMN model_ref TEXT;
     ALTER TABLE chunks ADD COLUMN page INTEGER;
     "#,
+    // v3:多知识库。默认知识库 id=1;记录归属 kb_id;会话记住所选范围(JSON 数组,空 = 全部)
+    // 注意:SQLite 在开启外键时不允许新增带 REFERENCES 且默认非空的列,归属有效性由代码保证
+    r#"
+    CREATE TABLE knowledge_bases(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+    );
+    INSERT INTO knowledge_bases(id, name, description, created_at)
+        VALUES(1, '默认知识库', '', CAST(strftime('%s','now') AS INTEGER) * 1000);
+    ALTER TABLE items ADD COLUMN kb_id INTEGER NOT NULL DEFAULT 1;
+    CREATE INDEX idx_items_kb ON items(kb_id, id DESC);
+    ALTER TABLE chat_sessions ADD COLUMN kb_ids TEXT;
+    "#,
 ];
+
+/// 默认知识库 id(不可删除)
+pub const DEFAULT_KB_ID: i64 = 1;
 
 /// 性能相关 PRAGMA:64MB 页缓存、256MB 内存映射、临时表放内存
 const PERF_PRAGMAS: &str =
@@ -279,6 +297,7 @@ mod tests {
                 "settings",
                 "chat_sessions",
                 "chat_messages",
+                "knowledge_bases",
             ] {
                 let n: i64 = c.query_row(
                     "SELECT count(*) FROM sqlite_master WHERE name=?",
@@ -293,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn v1库可升级到v2并保留数据() {
+    fn v1库可升级到最新版并保留数据() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("old.db");
         {
@@ -310,12 +329,56 @@ mod tests {
         let db = Db::open(&p, Some(&dir.path().join("bk"))).unwrap();
         db.with(|c| {
             let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-            assert_eq!(v, 2);
+            assert_eq!(v, LATEST_VERSION);
             let t: String = c.query_row("SELECT title FROM chat_sessions", [], |r| r.get(0))?;
             assert_eq!(t, "旧会话");
             // 新列可用
             c.execute("UPDATE chat_sessions SET model_ref='ollama:x'", [])?;
             c.execute("UPDATE chunks SET page=1", [])?;
+            c.execute("UPDATE chat_sessions SET kb_ids='[1]'", [])?;
+            // v3:默认知识库存在
+            let kb: String =
+                c.query_row("SELECT name FROM knowledge_bases WHERE id=1", [], |r| {
+                    r.get(0)
+                })?;
+            assert_eq!(kb, "默认知识库");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("bk")).unwrap().count(),
+            1,
+            "升级前应自动备份"
+        );
+    }
+
+    #[test]
+    fn v2库升级到v3后旧记录归入默认知识库() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("v2.db");
+        {
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.execute_batch(MIGRATIONS[1]).unwrap();
+            c.execute_batch("PRAGMA user_version = 2;").unwrap();
+            c.execute(
+                "INSERT INTO items(kind,content,status,created_at,updated_at) VALUES('note','旧笔记','done',1,1)",
+                [],
+            )
+            .unwrap();
+        }
+        let db = Db::open(&p, Some(&dir.path().join("bk"))).unwrap();
+        db.with(|c| {
+            let (kb, content): (i64, String) =
+                c.query_row("SELECT kb_id, content FROM items", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+            assert_eq!(kb, DEFAULT_KB_ID);
+            assert_eq!(content, "旧笔记");
+            let kb_ids: Option<String> = c
+                .query_row("SELECT kb_ids FROM chat_sessions", [], |r| r.get(0))
+                .unwrap_or(None);
+            assert!(kb_ids.is_none());
             Ok(())
         })
         .unwrap();

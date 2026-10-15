@@ -30,6 +30,8 @@ pub struct CaptureInput {
     pub text: Option<String>,
     /// 文件路径(拖入的文件或剪贴板暂存文件)
     pub paths: Vec<String>,
+    /// 导入到的知识库;None 为默认知识库
+    pub kb_id: Option<i64>,
 }
 
 /// 闪念提交结果
@@ -161,6 +163,8 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
             "文字过长,请保存为文件后作为文档导入".into(),
         ));
     }
+    let kb_id = input.kb_id.unwrap_or(crate::db::DEFAULT_KB_ID);
+    core.db.with(|c| repo::ensure_kb_exists(c, kb_id))?;
     let mut result = CaptureResult::default();
     let mut prepared: Vec<Prepared> = Vec::new();
     let mut has_image = false;
@@ -207,7 +211,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
             }
             if let Some(id) = core
                 .db
-                .with(|c| repo::find_by_hash(c, &stored.hash, kind_name))?
+                .with(|c| repo::find_by_hash(c, &stored.hash, kind_name, kb_id))?
             {
                 result.duplicates.push(id);
                 return Ok(None);
@@ -227,6 +231,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
                     original_name: Some(stored.original_name),
                     mime: Some(extract::mime_of(&stored.ext).into()),
                     content_hash: Some(stored.hash),
+                    kb_id: Some(kb_id),
                 },
             }))
         }
@@ -252,7 +257,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
         if !has_image || has_doc {
             if let Some(id) = core
                 .db
-                .with(|c| repo::find_recent_duplicate_note(c, &text, DUP_WINDOW_MS))?
+                .with(|c| repo::find_recent_duplicate_note(c, &text, DUP_WINDOW_MS, kb_id))?
             {
                 result.duplicates.push(id);
             } else {
@@ -260,6 +265,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
                     item: NewItem {
                         kind: "note".into(),
                         content: text.clone(),
+                        kb_id: Some(kb_id),
                         ..Default::default()
                     },
                 });
@@ -416,7 +422,8 @@ mod tests {
             &core,
             CaptureInput {
                 text: Some("  ".into()),
-                paths: vec![]
+                paths: vec![],
+                ..Default::default()
             }
         )
         .await
@@ -432,6 +439,7 @@ mod tests {
             CaptureInput {
                 text: Some("今天和老王聊了A项目".into()),
                 paths: vec![],
+                ..Default::default()
             },
         )
         .await
@@ -459,6 +467,7 @@ mod tests {
             CaptureInput {
                 text: Some("重复".into()),
                 paths: vec![],
+                ..Default::default()
             },
         )
         .await
@@ -468,6 +477,7 @@ mod tests {
             CaptureInput {
                 text: Some("重复".into()),
                 paths: vec![],
+                ..Default::default()
             },
         )
         .await
@@ -488,6 +498,7 @@ mod tests {
             CaptureInput {
                 text: Some("Redis 架构图".into()),
                 paths: vec![img.to_string_lossy().into()],
+                ..Default::default()
             },
         )
         .await
@@ -507,6 +518,7 @@ mod tests {
             CaptureInput {
                 text: None,
                 paths: vec![img.to_string_lossy().into()],
+                ..Default::default()
             },
         )
         .await
@@ -526,6 +538,7 @@ mod tests {
             CaptureInput {
                 text: Some("还是要存".into()),
                 paths: vec![bad.to_string_lossy().into()],
+                ..Default::default()
             },
         )
         .await
@@ -545,6 +558,7 @@ mod tests {
             CaptureInput {
                 text: None,
                 paths: vec![doc.to_string_lossy().into()],
+                ..Default::default()
             },
         )
         .await

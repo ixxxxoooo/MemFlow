@@ -155,6 +155,7 @@ async fn put(core: &Arc<Core>, text: &str) -> i64 {
         CaptureInput {
             text: Some(text.into()),
             paths: vec![],
+            ..Default::default()
         },
     )
     .await

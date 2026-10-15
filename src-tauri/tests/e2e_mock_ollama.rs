@@ -152,6 +152,7 @@ async fn put(core: &Arc<Core>, text: &str) -> i64 {
         CaptureInput {
             text: Some(text.into()),
             paths: vec![],
+            ..Default::default()
         },
     )
     .await
@@ -367,6 +368,7 @@ async fn 文档导入_分块并带全局摘要() {
         CaptureInput {
             text: None,
             paths: vec![doc.to_string_lossy().into()],
+            ..Default::default()
         },
     )
     .await
@@ -411,6 +413,7 @@ async fn 无文字线索的图片仅归档() {
         CaptureInput {
             text: None,
             paths: vec![img.to_string_lossy().into()],
+            ..Default::default()
         },
     )
     .await
@@ -457,6 +460,7 @@ async fn 文档默认快速索引_不调用模型提取() {
         CaptureInput {
             text: None,
             paths: vec![doc.to_string_lossy().into()],
+            ..Default::default()
         },
     )
     .await

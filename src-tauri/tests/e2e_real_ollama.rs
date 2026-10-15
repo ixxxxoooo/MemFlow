@@ -63,6 +63,7 @@ async fn 真机冒烟_录入问答流程图重刷溯源() {
         CaptureInput {
             text: Some("明天下午三点和老王开会,讨论 Q4 预算与招聘计划。".into()),
             paths: vec![],
+            ..Default::default()
         },
     )
     .await

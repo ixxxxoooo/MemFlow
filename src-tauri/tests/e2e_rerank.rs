@@ -62,6 +62,7 @@ async fn setup() -> (Arc<Core>, tempfile::TempDir) {
             CaptureInput {
                 text: Some(t.into()),
                 paths: vec![],
+                ..Default::default()
             },
         )
         .await

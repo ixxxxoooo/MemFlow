@@ -70,6 +70,7 @@ async fn ingest_pdf(
         CaptureInput {
             text: None,
             paths: vec![fixture(name).to_string_lossy().into()],
+            ..Default::default()
         },
     )
     .await
