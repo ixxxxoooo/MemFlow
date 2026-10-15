@@ -45,6 +45,9 @@ interface ChatState {
   /** 用户在输入框旁选择的模型引用;null 表示跟随设置里的默认模型 */
   modelRef: string | null;
   models: ChatModelOption[];
+  /** 本次提问限定的知识库范围(空 = 搜索全部);随会话保存与恢复 */
+  kbIds: number[];
+  setKbIds: (ids: number[]) => void;
   loadModels: () => Promise<void>;
   setModelRef: (ref: string | null) => void;
   loadSessions: () => Promise<void>;
@@ -65,6 +68,9 @@ export const useChat = create<ChatState>((set, get) => ({
   busy: false,
   modelRef: null,
   models: [],
+  kbIds: [],
+
+  setKbIds: (kbIds) => set({ kbIds }),
 
   loadModels: async () => {
     try {
@@ -97,6 +103,8 @@ export const useChat = create<ChatState>((set, get) => ({
     set({
       sessionId: id,
       modelRef: usable,
+      // 会话记住当时的知识库范围,恢复历史时一并还原
+      kbIds: get().sessions.find((x) => x.id === id)?.kbIds ?? [],
       messages: msgs.map((m) => ({
         key: nextKey(), role: m.role, content: m.content, sources: m.sources ?? [], streaming: false,
         meta: m.role === "assistant" && m.model
@@ -169,7 +177,7 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     };
     try {
-      await api.chatAsk(get().sessionId, q, get().modelRef, onEvent);
+      await api.chatAsk(get().sessionId, q, get().modelRef, get().kbIds, onEvent);
     } catch (err) {
       if (raf) cancelAnimationFrame(raf);
       buffer = "";

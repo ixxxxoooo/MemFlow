@@ -5,6 +5,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { importTargetKb } from "../lib/kbScope";
+import { useKb } from "../lib/kbStore";
 import { CloseIcon, FileIcon, ImageIcon, SparkleIcon } from "../main/components/icons";
 
 interface Attach {
@@ -16,6 +18,14 @@ interface Attach {
 }
 
 const STALE_DRAFT_MS = 5 * 60 * 1000;
+
+/** 读取主窗口持久化的知识库选择(与 kbStore 的存储键一致) */
+function readId(key: string): number | null {
+  const n = Number(localStorage.getItem(key));
+  return localStorage.getItem(key) != null && Number.isInteger(n) ? n : null;
+}
+const readCurrent = () => readId("memflow.currentKb");
+const readLast = () => readId("memflow.lastImportKb");
 let seq = 1;
 
 export function Capsule() {
@@ -24,6 +34,10 @@ export function Capsule() {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { kbs, current, lastImport, load: loadKbs, rememberImport } = useKb();
+  // 本次存入的知识库:默认沿用主窗口当前选择 / 最近一次导入所选;用户在胶囊里改过则以改动为准
+  const [pickedKb, setPickedKb] = useState<number | null>(null);
+  const target = pickedKb != null && kbs.some((k) => k.id === pickedKb) ? pickedKb : importTargetKb(current, lastImport, kbs);
   const ta = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const hiddenAt = useRef(Date.now());
@@ -45,7 +59,12 @@ export function Capsule() {
   // 每次被唤起:聚焦;草稿超过 5 分钟则清空
   useEffect(() => {
     focusInput();
+    void loadKbs();
     const p = listen("capsule-shown", () => {
+      // 主窗口可能刚切换过知识库:重新读取选择与列表
+      setPickedKb(null);
+      useKb.setState({ current: readCurrent(), lastImport: readLast() });
+      void loadKbs();
       if (Date.now() - hiddenAt.current > STALE_DRAFT_MS) {
         setText("");
         setFiles([]);
@@ -54,7 +73,7 @@ export function Capsule() {
       setTimeout(focusInput, 30);
     });
     return () => { p.then((f) => f()); };
-  }, [focusInput]);
+  }, [focusInput, loadKbs]);
 
   // 窗口高度随内容自适应
   useLayoutEffect(() => {
@@ -116,7 +135,8 @@ export function Capsule() {
     setBusy(true);
     setError("");
     try {
-      const r = await api.captureSubmit(trimmed || null, fs.map((f) => f.path));
+      rememberImport(target);
+      const r = await api.captureSubmit(trimmed || null, fs.map((f) => f.path), target);
       fs.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
       setText("");
       setFiles([]);
@@ -178,8 +198,22 @@ export function Capsule() {
         </div>
       )}
       {error && <div className="px-4 pb-3 text-xs text-[var(--err)]">{error}</div>}
-      {(text || files.length > 0) && !error && (
-        <div className="px-4 pb-2.5 text-[11px] text-[var(--fg-faint)]">Enter 保存 · Shift+Enter 换行 · Esc 收起(草稿会保留)</div>
+      {(text || files.length > 0 || kbs.length > 1) && !error && (
+        <div className="flex items-center gap-2 px-4 pb-2.5 text-[11px] text-[var(--fg-faint)]">
+          {kbs.length > 1 && (
+            <label className="flex items-center gap-1">
+              存入
+              <select
+                value={target}
+                onChange={(e) => setPickedKb(Number(e.target.value))}
+                className="max-w-[140px] rounded-md border border-[var(--line)] bg-transparent px-1 py-0.5 text-[11px] text-[var(--fg-dim)] outline-none"
+              >
+                {kbs.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+              </select>
+            </label>
+          )}
+          {(text || files.length > 0) && <span>Enter 保存 · Shift+Enter 换行 · Esc 收起(草稿会保留)</span>}
+        </div>
       )}
     </div>
   );

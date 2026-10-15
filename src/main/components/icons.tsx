@@ -39,3 +39,6 @@ export const AlertIcon = (p: P) => <I {...p}><path d="M12 3 2 20h20L12 3ZM12 10v
 export const SidebarRightIcon = (p: P) => <I {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></I>;
 export const EditIcon = (p: P) => <I {...p}><path d="M4 20h4L19 9l-4-4L4 16v4ZM13.500 6.500l4 4" /></I>;
 export const ChevronDownIcon = (p: P) => <I {...p}><path d="m6 9 6 6 6-6" /></I>;
+export const FolderIcon = (p: P) => <I {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></I>;
+export const MoveIcon = (p: P) => <I {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2M3 7v10a2 2 0 0 0 2 2h8M16 15h6m0 0-3-3m3 3-3 3" /></I>;
+export const AtIcon = (p: P) => <I {...p}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></I>;

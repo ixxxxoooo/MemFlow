@@ -4,7 +4,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus, CaptureResult, ChatEvent, ChatModelOption, ItemDetail, ItemFilter, Item, PullProgress,
-  RerankModel, Session, Settings, StoredMessage, TagCount,
+  Kb, MoveResult, RerankModel, Session, Settings, StoredMessage, TagCount,
 } from "./types";
 
 /** 调用后端命令,把字符串错误统一包装成 Error */
@@ -50,8 +50,15 @@ export const api = {
   listChatModels: () => call<ChatModelOption[]>("list_chat_models"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (settings: Settings) => call<void>("update_settings", { settings }),
-  captureSubmit: (text: string | null, paths: string[]) =>
-    call<CaptureResult>("capture_submit", { input: { text, paths } }),
+  captureSubmit: (text: string | null, paths: string[], kbId: number | null = null) =>
+    call<CaptureResult>("capture_submit", { input: { text, paths, kbId } }),
+  listKbs: () => call<Kb[]>("list_kbs"),
+  createKb: (name: string, description: string | null = null) => call<Kb>("create_kb", { name, description }),
+  renameKb: (id: number, name: string, description: string | null = null) =>
+    call<void>("rename_kb", { id, name, description }),
+  /** mode:moveToDefault 转移到默认知识库 / cascade 连同记录一起删除 */
+  deleteKb: (id: number, mode: "moveToDefault" | "cascade") => call<number>("delete_kb", { id, mode }),
+  moveItems: (ids: number[], kbId: number) => call<MoveResult>("move_items", { ids, kbId }),
   /** 把剪贴板里的二进制文件暂存到后端,返回暂存路径 */
   async stageFile(file: File): Promise<string> {
     const safe = file.name.replace(/[^A-Za-z0-9._-]/g, "_") || "paste.png";
@@ -71,10 +78,10 @@ export const api = {
   reindexAi: (ids: number[]) => call<number>("reindex_ai", { ids }),
   retryFailed: (ids: number[] | null) => call<number>("retry_failed", { ids }),
   cancelItem: (id: number) => call<void>("cancel_item", { id }),
-  chatAsk: (sessionId: number | null, question: string, modelRef: string | null, onEvent: (e: ChatEvent) => void) => {
+  chatAsk: (sessionId: number | null, question: string, modelRef: string | null, kbIds: number[], onEvent: (e: ChatEvent) => void) => {
     const ch = new Channel<ChatEvent>();
     ch.onmessage = onEvent;
-    return call<void>("chat_ask", { sessionId, question, modelRef, onEvent: ch });
+    return call<void>("chat_ask", { sessionId, question, modelRef, kbIds, onEvent: ch });
   },
   chatCancel: () => call<void>("chat_cancel"),
   listSessions: () => call<Session[]>("list_sessions"),

@@ -3,6 +3,7 @@
 
 import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
+import { KbSwitcher } from "./KbSwitcher";
 import { ChatIcon, LibraryIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
 
 const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
@@ -53,6 +54,7 @@ export function Sidebar() {
         <SparkleIcon size={16} className="text-[var(--accent)]" />
         <span className="text-[15px] font-semibold tracking-tight">MemFlow</span>
       </div>
+      <KbSwitcher />
       <nav className="flex flex-col gap-0.5 px-2.5">
         {NAV.map((n) => (
           <button

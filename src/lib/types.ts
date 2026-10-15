@@ -4,9 +4,28 @@
 export type ItemKind = "note" | "image" | "document";
 export type ItemStatus = "pending" | "processing" | "done" | "archived_only" | "failed";
 
+/** 知识库 */
+export interface Kb {
+  id: number;
+  name: string;
+  description: string;
+  createdAt: number;
+  /** 库内记录数 */
+  itemCount: number;
+}
+
+/** 转移记录的结果 */
+export interface MoveResult {
+  moved: number[];
+  /** 目标库已有相同内容而被跳过 */
+  skipped: number[];
+}
+
 export interface Item {
   id: number;
   kind: ItemKind;
+  /** 所属知识库 */
+  kbId: number;
   title: string | null;
   content: string;
   contentLength: number;
@@ -50,6 +69,8 @@ export interface ItemFilter {
   search?: string;
   beforeId?: number;
   limit?: number;
+  /** 限定知识库(省略 = 全部) */
+  kbId?: number;
 }
 
 export interface Settings {
@@ -177,6 +198,9 @@ export interface Source {
   chunkId: number;
   itemId: number;
   kind: ItemKind;
+  /** 来源所在知识库 */
+  kbId: number;
+  kbName: string | null;
   title: string | null;
   text: string;
   heading: string | null;
@@ -193,6 +217,8 @@ export interface Session {
   updatedAt: number;
   /** 该会话最近一次使用的模型引用 */
   modelRef: string | null;
+  /** 该会话限定的知识库范围(空 = 全部) */
+  kbIds: number[];
 }
 
 export interface StoredMessage {

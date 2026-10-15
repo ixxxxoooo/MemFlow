@@ -10,7 +10,9 @@ import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
 import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
-import { CloseIcon, EditIcon, RefreshIcon, TrashIcon } from "./icons";
+import { useKb } from "../../lib/kbStore";
+import { CloseIcon, EditIcon, MoveIcon, RefreshIcon, TrashIcon } from "./icons";
+import { MoveToMenu } from "./MoveToMenu";
 
 /** 根据附件相对路径生成可显示的 URL */
 export function useAttachmentUrl(rel: string | null | undefined): string | null {
@@ -29,6 +31,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 export function ItemDrawer() {
   const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus } = useApp();
+  const { kbs, move } = useKb();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -84,7 +87,29 @@ export function ItemDrawer() {
           <div className="text-[11px] text-[var(--fg-dim)]">{kindLabel}详情{it ? ` · ${fmtDate(it.createdAt)} ${fmtTime(it.createdAt)}` : ""}</div>
           <div className="truncate text-sm font-semibold">{it?.title ?? it?.originalName ?? (it ? "闪念记录" : "…")}</div>
         </div>
-        <button className="rounded-full p-1.5 hover:bg-[var(--bg-soft)]" onClick={closeDrawer}><CloseIcon size={14} /></button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {it && kbs.length > 1 && (
+            <MoveToMenu
+              className="rounded-full p-1.5 text-[var(--fg-dim)] hover:bg-[var(--bg-soft)] hover:text-[var(--accent)]"
+              title={`移动到其他知识库(当前:${kbs.find((k) => k.id === it.kbId)?.name ?? "默认知识库"})`}
+              disabledIds={[it.kbId]}
+              align="right"
+              onPick={async (kbId) => {
+                try {
+                  const r = await move([it.id], kbId);
+                  const name = kbs.find((k) => k.id === kbId)?.name ?? "目标知识库";
+                  toast(r.moved.length ? `已移动到「${name}」` : "目标知识库已有相同内容,未移动", r.moved.length ? "ok" : "info");
+                  bumpData();
+                } catch (e) {
+                  toast((e as Error).message, "err");
+                }
+              }}
+            >
+              <MoveIcon size={14} />
+            </MoveToMenu>
+          )}
+          <button className="rounded-full p-1.5 hover:bg-[var(--bg-soft)]" onClick={closeDrawer}><CloseIcon size={14} /></button>
+        </div>
       </div>
 
       <div className="selectable flex-1 space-y-4 overflow-y-auto p-4 text-[13px]">

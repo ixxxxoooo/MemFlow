@@ -2,6 +2,8 @@
 // AI 问答视图:对话流 + 流式输出 + 来源角标 + 历史会话
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { filterKbs, mentionAt, normalizeScope, removeMention, toggleScope, type Mention } from "../../lib/kbScope";
+import { useKb } from "../../lib/kbStore";
 import { overlayOpen } from "../../lib/overlay";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
@@ -9,7 +11,8 @@ import { fmtDate, fmtDuration } from "../../lib/format";
 import { STAGE_TEXT, useChat } from "../../lib/chatStore";
 import { useApp } from "../../lib/store";
 import type { Source } from "../../lib/types";
-import { HistoryIcon, PlusIcon, SendIcon, SparkleIcon, StopIcon, TrashIcon } from "../components/icons";
+import { CloseIcon, FolderIcon, HistoryIcon, PlusIcon, SendIcon, SparkleIcon, StopIcon, TrashIcon } from "../components/icons";
+import { KbMentionPopup, KbScopeButton } from "../components/KbScopePicker";
 import { BrandIcon } from "../components/BrandIcon";
 import { Markdown } from "../components/Markdown";
 import { ModelPicker } from "../components/ModelPicker";
@@ -21,7 +24,11 @@ const SUGGESTIONS = [
 ];
 
 export function ChatView() {
-  const { messages, busy, send, stop, sessions, loadSessions, openSession, newSession, removeSession, sessionId } = useChat();
+  const { messages, busy, send, stop, sessions, loadSessions, openSession, newSession, removeSession, sessionId, kbIds, setKbIds } = useChat();
+  const kbs = useKb((s) => s.kbs);
+  // 输入框里正在键入的 @ 提及与候选高亮
+  const [mention, setMention] = useState<Mention | null>(null);
+  const [hl, setHl] = useState(0);
   const { openDrawer, openDocModal, status, toast } = useApp();
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -44,7 +51,11 @@ export function ChatView() {
   const submit = async () => {
     const q = input.trim();
     if (!q || busy) return;
+    // 范围里已被删除的知识库先剔除,避免后端提示"所选知识库已不存在"
+    const scope = normalizeScope(kbIds, kbs);
+    if (scope.length !== kbIds.length) setKbIds(scope);
     setInput("");
+    setMention(null);
     stick.current = true;
     if (taRef.current) taRef.current.style.height = "auto";
     await send(q);
@@ -55,6 +66,29 @@ export function ChatView() {
     [openDocModal, openDrawer],
   );
   const empty = messages.length === 0;
+  const scope = normalizeScope(kbIds, kbs);
+  const candidates = mention ? filterKbs(kbs, mention.query) : [];
+
+  /** 根据当前文本与光标刷新 @ 提及状态 */
+  const syncMention = (el: HTMLTextAreaElement) => {
+    const m = kbs.length > 1 ? mentionAt(el.value, el.selectionStart ?? el.value.length) : null;
+    setMention(m);
+    if (!m) return;
+    setHl(0);
+  };
+
+  /** 选中候选:加入范围并把输入框里的 @词 删掉 */
+  const pickKb = (kb: { id: number }) => {
+    const el = taRef.current;
+    if (el && mention) {
+      const caret = el.selectionStart ?? el.value.length;
+      const r = removeMention(el.value, mention, caret);
+      setInput(r.text);
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.caret, r.caret); });
+    }
+    setKbIds(toggleScope(scope, kb.id));
+    setMention(null);
+  };
 
   return (
     <div className="relative flex h-full flex-col">
@@ -142,6 +176,7 @@ export function ChatView() {
                         <button key={s.n} onClick={() => onCite(s)} className="flex max-w-[200px] items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 hover:border-[var(--accent)] hover:text-[var(--accent)]">
                           <span className="font-semibold text-[var(--accent)]">{s.n}</span>
                           <span className="truncate">{s.title ?? (s.kind === "image" ? "图片" : "记录")}{s.page ? ` p.${s.page}` : ""}</span>
+                          {kbs.length > 1 && s.kbName && <span className="shrink-0 text-[10px] text-[var(--fg-faint)]">· {s.kbName}</span>}
                         </button>
                       ))}
                     </div>
@@ -155,21 +190,49 @@ export function ChatView() {
       </div>
 
       <div className="px-6 pb-5">
-        <div className="mx-auto flex max-w-[760px] items-end gap-1 rounded-2xl border border-[var(--line)] bg-[var(--bg-elev)] p-2 shadow-sm focus-within:border-[var(--accent)]">
+        <div className="relative mx-auto max-w-[760px] rounded-2xl border border-[var(--line)] bg-[var(--bg-elev)] shadow-sm focus-within:border-[var(--accent)]">
+          {mention && <KbMentionPopup candidates={candidates} selected={scope} highlight={hl} onPick={pickKb} />}
+          {scope.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5 text-xs">
+              <span className="text-[var(--fg-faint)]">范围</span>
+              {scope.map((id) => (
+                <span key={id} className="flex items-center gap-1 rounded-full bg-[var(--accent-soft)] py-0.5 pl-2 pr-1 text-[var(--accent)]">
+                  <FolderIcon size={11} />
+                  {kbs.find((k) => k.id === id)?.name}
+                  <button type="button" aria-label="移除" disabled={busy} className="rounded-full p-0.5 hover:bg-[var(--accent)] hover:text-[var(--on-accent)] disabled:opacity-40" onClick={() => setKbIds(scope.filter((x) => x !== id))}>
+                    <CloseIcon size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-1 p-2">
           <ModelPicker />
+          <KbScopeButton />
           <textarea
             ref={taRef}
             rows={1}
             value={input}
-            placeholder="向你的知识库提问…(Enter 发送,Shift+Enter 换行)"
+            placeholder={kbs.length > 1 ? "向你的知识库提问…(输入 @ 选择知识库,Enter 发送)" : "向你的知识库提问…(Enter 发送,Shift+Enter 换行)"}
             className={`max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-[14.5px] outline-none ${busy ? "caret-transparent" : ""}`}
             onChange={(e) => {
               setInput(e.target.value);
               e.target.style.height = "auto";
               e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+              syncMention(e.target);
             }}
+            onClick={(e) => syncMention(e.currentTarget)}
+            onBlur={() => setMention(null)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (e.nativeEvent.isComposing) return;
+              // @ 候选打开时,方向键/回车/Tab/Esc 优先作用于候选
+              if (mention) {
+                if (e.key === "ArrowDown") { e.preventDefault(); setHl((h) => (candidates.length ? (h + 1) % candidates.length : 0)); return; }
+                if (e.key === "ArrowUp") { e.preventDefault(); setHl((h) => (candidates.length ? (h - 1 + candidates.length) % candidates.length : 0)); return; }
+                if ((e.key === "Enter" || e.key === "Tab") && candidates[hl]) { e.preventDefault(); pickKb(candidates[hl]); return; }
+                if (e.key === "Escape") { e.preventDefault(); setMention(null); return; }
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void submit();
               }
@@ -180,6 +243,7 @@ export function ChatView() {
           ) : (
             <button className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent)] text-[var(--on-accent)] disabled:opacity-35" disabled={!input.trim()} onClick={() => void submit()}><SendIcon size={16} /></button>
           )}
+          </div>
         </div>
       </div>
     </div>

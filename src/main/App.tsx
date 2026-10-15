@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { useKb } from "../lib/kbStore";
 import { useApp } from "../lib/store";
 import type { QueueStatus } from "../lib/types";
 import { UploadIcon } from "./components/icons";
@@ -21,6 +22,7 @@ import { TimelineView } from "./views/TimelineView";
 export function App() {
   const { view, drawer, refreshStatus, setQueue, bumpData, itemsDeleted, toast, closeDrawer, closeDocModal } = useApp();
   const [dragging, setDragging] = useState(false);
+  const loadKbs = useKb((s) => s.load);
 
   // 订阅后端事件;Ollama 状态变化由后端推送,定时轮询只作兜底(30 秒)
   useEffect(() => {
@@ -31,12 +33,18 @@ export function App() {
       listen("ollama-status", () => { void refreshStatus(); }),
       listen("item-updated", () => { bumpData(); }),
       listen<{ id: number }>("item-deleted", (e) => { itemsDeleted([e.payload.id]); }),
+      listen("kb-changed", () => { void loadKbs(); bumpData(); }),
     ];
     return () => {
       clearInterval(timer);
       unlistens.forEach((p) => p.then((f) => f()));
     };
-  }, [refreshStatus, setQueue, bumpData, itemsDeleted]);
+  }, [refreshStatus, setQueue, bumpData, itemsDeleted, loadKbs]);
+
+  // 启动时载入知识库;数据变化(导入/删除/转移)后刷新各库记录数
+  useEffect(() => { void loadKbs(); }, [loadKbs]);
+  const dataVersion = useApp((s) => s.dataVersion);
+  useEffect(() => { void loadKbs(); }, [dataVersion, loadKbs]);
 
   // 队列从忙到空闲时刷新统计
   const busy = useApp((s) => (s.queue?.pending ?? 0) + (s.queue?.running ?? 0));
@@ -51,8 +59,12 @@ export function App() {
       else if (t === "drop") {
         setDragging(false);
         try {
-          const r = await api.captureSubmit(null, e.payload.paths);
-          if (r.created.length) toast(`已加入 ${r.created.length} 项,后台解析中`, "ok");
+          const kb = useKb.getState();
+          const target = kb.importTarget();
+          kb.rememberImport(target);
+          const targetName = kb.kbs.find((k) => k.id === target)?.name ?? "默认知识库";
+          const r = await api.captureSubmit(null, e.payload.paths, target);
+          if (r.created.length) toast(`已加入 ${r.created.length} 项到「${targetName}」,后台解析中`, "ok");
           if (r.duplicates.length) toast(`${r.duplicates.length} 项已存在,已跳过`, "info");
           if (r.errors.length) toast(r.errors.join(";"), "err");
           bumpData();

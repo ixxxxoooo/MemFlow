@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { fmtDayLabel, groupBy } from "../../lib/format";
+import { useKb } from "../../lib/kbStore";
 import { useApp } from "../../lib/store";
 import type { Item, TagCount } from "../../lib/types";
 import { CloseIcon, SearchIcon } from "../components/icons";
@@ -23,6 +24,7 @@ export function TimelineView() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
+  const current = useKb((s) => s.current);
   const [moreOpen, setMoreOpen] = useState(false);
   const [tagQuery, setTagQuery] = useState("");
 
@@ -35,7 +37,7 @@ export function TimelineView() {
     const my = ++seq.current;
     setLoading(true);
     try {
-      const rows = await api.listItems({ kind, tag: tag ?? undefined, search: debounced || undefined, beforeId: before, limit: PAGE });
+      const rows = await api.listItems({ kind, tag: tag ?? undefined, search: debounced || undefined, beforeId: before, limit: PAGE, kbId: current ?? undefined });
       if (my !== seq.current) return;
       setItems((prev) => (append ? [...prev, ...rows] : rows));
       setHasMore(rows.length === PAGE);
@@ -44,7 +46,7 @@ export function TimelineView() {
     } finally {
       if (my === seq.current) setLoading(false);
     }
-  }, [kind, tag, debounced, toast]);
+  }, [kind, tag, debounced, current, toast]);
 
   useEffect(() => { void load(false); }, [load, dataVersion]);
 
