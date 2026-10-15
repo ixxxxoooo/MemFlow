@@ -447,6 +447,26 @@ impl OllamaClient {
         Ok(())
     }
 
+    /// 预热:让 Ollama 提前把模型载入内存(空请求不生成文字),失败忽略
+    ///
+    /// 参数: model 模型名;keep_alive 常驻时长;num_ctx 上下文长度(需与后续请求一致,否则会重载)
+    pub async fn preload(&self, model: &str, keep_alive: &str, num_ctx: u32) {
+        let r = self
+            .http
+            .post(self.url("/api/generate"))
+            .timeout(Duration::from_secs(120))
+            .json(&json!({
+                "model": model,
+                "keep_alive": keep_alive,
+                "options": { "num_ctx": num_ctx },
+            }))
+            .send()
+            .await;
+        if let Err(e) = r {
+            tracing::debug!("预热模型 {model} 失败: {e}");
+        }
+    }
+
     /// 立即卸载模型释放内存(失败忽略,仅记录日志)
     ///
     /// 参数: model 模型名

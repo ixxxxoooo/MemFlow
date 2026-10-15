@@ -2,9 +2,10 @@
 // AI 问答视图:对话流 + 流式输出 + 来源角标 + 历史会话
 
 import { useEffect, useRef, useState } from "react";
+import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { fmtDate, fmtDuration } from "../../lib/format";
-import { useChat } from "../../lib/chatStore";
+import { STAGE_TEXT, useChat } from "../../lib/chatStore";
 import { useApp } from "../../lib/store";
 import type { Source } from "../../lib/types";
 import { HistoryIcon, PlusIcon, SendIcon, SparkleIcon, StopIcon, TrashIcon } from "../components/icons";
@@ -29,6 +30,8 @@ export function ChatView() {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { void loadSessions(); }, [loadSessions]);
+  // 进入问答页时预热模型,首次提问不再等待加载
+  useEffect(() => { void api.warmChat(useChat.getState().modelRef).catch(() => undefined); }, []);
 
   // 流式输出时自动贴底;用户上滑查看历史时不打扰
   useEffect(() => {
@@ -115,7 +118,7 @@ export function ChatView() {
                   {m.content ? (
                     <Markdown text={m.content} sources={m.sources} streaming={m.streaming} onCite={onCite} />
                   ) : null}
-                  {m.streaming && !m.content && <div className="text-sm text-[var(--fg-dim)]">正在检索并思考<span className="typing-dot" /></div>}
+                  {m.streaming && !m.content && <div className="text-sm text-[var(--fg-dim)]">{m.stage ? STAGE_TEXT[m.stage] : "正在检索并思考"}<span className="typing-dot" /></div>}
                   {m.error && <div className="mt-2 rounded-lg bg-[var(--err)]/10 px-3 py-2 text-[13px] text-[var(--err)]">{m.error}</div>}
                   {m.meta && !m.streaming && (
                     <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-[var(--fg-faint)]" title="回答所用模型与耗时">

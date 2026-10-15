@@ -18,7 +18,7 @@ pub struct Settings {
     pub vision_model: String,
     /// 是否启用视觉解析(默认关闭)
     pub vision_enabled: bool,
-    /// 模型常驻时长,如 "5m"
+    /// 模型常驻时长,如 "30m"
     pub keep_alive: String,
     /// 全局快捷键
     pub shortcut: String,
@@ -93,7 +93,7 @@ impl Default for Settings {
             text_model: "qwen2.5:7b".into(),
             vision_model: "minicpm-v".into(),
             vision_enabled: false,
-            keep_alive: "5m".into(),
+            keep_alive: "30m".into(),
             shortcut: "CommandOrControl+Shift+K".into(),
             score_threshold: 0.40,
             top_k: 8,

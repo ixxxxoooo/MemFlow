@@ -45,6 +45,8 @@ export const api = {
   testLlmConnection: (baseUrl: string, model: string, key: string | null, profileId: string | null = null) =>
     call<string>("test_llm_connection", { baseUrl, model, key, profileId }),
   /** 对话可选的模型(本地已安装 + 已配置密钥的云端) */
+  /** 预热向量模型与所选本地模型,减少首次提问等待 */
+  warmChat: (modelRef: string | null) => call<void>("warm_chat", { modelRef }),
   listChatModels: () => call<ChatModelOption[]>("list_chat_models"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (settings: Settings) => call<void>("update_settings", { settings }),

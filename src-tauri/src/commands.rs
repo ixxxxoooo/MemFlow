@@ -450,6 +450,13 @@ pub async fn list_chat_models(core: S<'_>) -> Result<Vec<crate::chat_models::Cha
     Ok(crate::chat_models::list_chat_models(&core).await)
 }
 
+/// 预热对话与向量模型(进入问答页或切换模型时调用,后台执行不阻塞界面)
+#[tauri::command]
+pub async fn warm_chat(core: S<'_>, model_ref: Option<String>) -> Result<()> {
+    crate::chat_models::warm(&core, model_ref.as_deref()).await;
+    Ok(())
+}
+
 /// 停止当前问答
 #[tauri::command]
 pub fn chat_cancel(core: S<'_>) {

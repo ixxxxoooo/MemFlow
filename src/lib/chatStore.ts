@@ -15,8 +15,16 @@ export interface UiMessage {
   /** 回答所用模型与耗时(仅助手消息,生成完成后才有) */
   meta?: AnswerMeta;
   /** 发送这一问时的检索/生成阶段提示 */
-  stage?: string;
+  stage?: "rewrite" | "retrieve" | "rerank" | "generate";
 }
+
+/** 阶段提示文案 */
+export const STAGE_TEXT: Record<NonNullable<UiMessage["stage"]>, string> = {
+  rewrite: "正在理解问题",
+  retrieve: "正在检索资料",
+  rerank: "正在重排序",
+  generate: "正在生成回答",
+};
 
 /** 与后端 default_ref 保持一致:未显式选择时使用的模型引用 */
 export function defaultRef(s: Settings): string {
@@ -66,7 +74,11 @@ export const useChat = create<ChatState>((set, get) => ({
     }
   },
 
-  setModelRef: (ref) => set({ modelRef: ref }),
+  setModelRef: (ref) => {
+    set({ modelRef: ref });
+    // 切换后立即预热,下一问不必等待模型加载
+    void api.warmChat(ref).catch(() => undefined);
+  },
 
   loadSessions: async () => {
     try {
@@ -138,6 +150,9 @@ export const useChat = create<ChatState>((set, get) => ({
       switch (e.event) {
         case "session":
           set({ sessionId: e.data.sessionId });
+          break;
+        case "stage":
+          patch((m) => ({ ...m, stage: e.data.stage }));
           break;
         case "sources":
           patch((m) => ({ ...m, sources: e.data.sources }));

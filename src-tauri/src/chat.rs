@@ -26,6 +26,8 @@ const MAX_CONTEXT_CHARS: usize = 6500;
 const HISTORY_MESSAGES: usize = 6;
 /// 单条历史消息最大字符数
 const HISTORY_MSG_CHARS: usize = 1200;
+/// 查询改写的最长等待时间;超时则直接用原问题检索的结果
+const REWRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1200);
 /// 无资料时的固定回复
 pub const NO_RESULT_ANSWER: &str =
     "记录中没有找到与这个问题相关的内容。你可以换个说法再问,或先把相关信息记录/导入进来。";
@@ -37,6 +39,8 @@ pub enum ChatEvent {
     /// 会话信息
     #[serde(rename_all = "camelCase")]
     Session { session_id: i64 },
+    /// 当前阶段:rewrite 理解问题 / retrieve 检索 / rerank 重排 / generate 生成
+    Stage { stage: String },
     /// 检索到的资料(编号从 1 开始)
     Sources { sources: Vec<SourceView> },
     /// 文本片段
@@ -203,6 +207,61 @@ fn history_messages(msgs: &[repo::MessageView]) -> Vec<ChatMessage> {
         .collect()
 }
 
+/// 判断追问是否需要改写:很短,或较短且含指代词时才需要
+///
+/// 参数: q 当前问题
+/// 返回: true 表示可能依赖上文,应当改写
+pub fn needs_rewrite(q: &str) -> bool {
+    use std::sync::OnceLock;
+    static ZH: OnceLock<Regex> = OnceLock::new();
+    static EN: OnceLock<Regex> = OnceLock::new();
+    let zh = ZH.get_or_init(|| {
+        Regex::new("它们|它|他们|她们|这个|那个|这些|那些|上面|上述|前面|刚才|刚刚|继续|展开|详细|其中|该项|此项|然后呢|还有呢")
+            .expect("正则非法")
+    });
+    let en = EN.get_or_init(|| {
+        Regex::new(r"(?i)\b(it|its|they|them|that|this|those|these|above|previous|earlier|more|continue)\b")
+            .expect("正则非法")
+    });
+    let n = q.trim().chars().count();
+    if n <= 6 {
+        return true;
+    }
+    (n <= 40 && zh.is_match(q)) || (n <= 80 && en.is_match(q))
+}
+
+/// 按倒数排名融合多路命中(同一切片取先出现者),返回前 top_n 条
+///
+/// 参数: lists 多路已排序命中;top_n 保留条数
+/// 返回: 融合后的命中,score 为融合得分
+pub fn merge_hits(lists: Vec<Vec<Hit>>, top_n: usize) -> Vec<Hit> {
+    use std::collections::HashMap;
+    const K: f32 = 60.0;
+    let mut score: HashMap<i64, f32> = HashMap::new();
+    let mut keep: HashMap<i64, Hit> = HashMap::new();
+    for list in lists {
+        for (rank, h) in list.into_iter().enumerate() {
+            *score.entry(h.chunk_id).or_insert(0.0) += 1.0 / (K + rank as f32 + 1.0);
+            keep.entry(h.chunk_id).or_insert(h);
+        }
+    }
+    let mut out: Vec<Hit> = keep
+        .into_iter()
+        .map(|(id, mut h)| {
+            h.score = score[&id];
+            h
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.chunk_id.cmp(&b.chunk_id))
+    });
+    out.truncate(top_n);
+    out
+}
+
 /// 改写追问为独立检索问句,失败则回退原问题
 async fn rewrite_query(
     core: &Core,
@@ -292,20 +351,39 @@ pub async fn ask(
     if model.is_local() {
         core.prepare_chat_model(&model.model).await;
     }
-    let search_q = if settings.query_rewrite && !history.is_empty() {
-        rewrite_query(core, &model, &history, q).await
-    } else {
-        q.to_string()
+    let opts = SearchOptions {
+        top_n: settings.top_k,
+        threshold: settings.score_threshold,
     };
-    let hits = retrieval::hybrid_search(
-        core,
-        &search_q,
-        &SearchOptions {
-            top_n: settings.top_k,
-            threshold: settings.score_threshold,
-        },
-    )
-    .await?;
+    let stage = |name: &str| {
+        emit(ChatEvent::Stage {
+            stage: name.to_string(),
+        })
+    };
+    let on_stage = |s: &str| stage(s);
+    let hits = if settings.query_rewrite && !history.is_empty() && needs_rewrite(q) {
+        // 追问:原问题检索与改写并行,改写最多等 1.2 秒;改写有效时再检索一次并融合
+        stage("rewrite");
+        let (first, rewritten) = tokio::join!(
+            retrieval::hybrid_search_with_stage(core, q, &opts, &on_stage),
+            tokio::time::timeout(REWRITE_TIMEOUT, rewrite_query(core, &model, &history, q))
+        );
+        let first = first?;
+        match rewritten {
+            Ok(rq) if rq.trim() != q => {
+                let second =
+                    retrieval::hybrid_search_with_stage(core, &rq, &opts, &on_stage).await?;
+                merge_hits(vec![second, first], opts.top_n)
+            }
+            Ok(_) => first,
+            Err(_) => {
+                tracing::debug!("查询改写超时,使用原问题的检索结果");
+                first
+            }
+        }
+    } else {
+        retrieval::hybrid_search_with_stage(core, q, &opts, &on_stage).await?
+    };
 
     // 无资料:拒答
     if hits.is_empty() {
@@ -337,6 +415,7 @@ pub async fn ask(
         sources: sources.clone(),
     });
 
+    stage("generate");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut messages = vec![ChatMessage::new(
         "system",
@@ -440,6 +519,35 @@ pub async fn fix_mermaid(core: &Arc<Core>, code: &str, error: &str) -> Result<St
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 追问判断_短句与指代词需要改写_完整问题不需要() {
+        assert!(needs_rewrite("那预算呢"));
+        assert!(needs_rewrite("它会缩减多少"));
+        assert!(needs_rewrite("tell me more about it"));
+        assert!(!needs_rewrite("上周和老王讨论的A项目预算安排是怎样的"));
+        assert!(!needs_rewrite(
+            "What did I write about the quarterly budget meeting last week"
+        ));
+    }
+
+    fn hit_id(id: i64) -> Hit {
+        let mut h = hit("note", "");
+        h.chunk_id = id;
+        h
+    }
+
+    #[test]
+    fn 融合命中_两路都靠前的排最前且去重并截断() {
+        let a = vec![hit_id(1), hit_id(2), hit_id(3)];
+        let b = vec![hit_id(3), hit_id(1), hit_id(4)];
+        let m = merge_hits(vec![a, b], 3);
+        let ids: Vec<i64> = m.iter().map(|h| h.chunk_id).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], 1); // 1 在两路排名 1、2;3 为 3、1,总分 1 略高
+        assert!(ids.contains(&3));
+        assert!(!ids.contains(&4));
+    }
+
     use super::*;
 
     fn hit(kind: &str, text: &str) -> Hit {

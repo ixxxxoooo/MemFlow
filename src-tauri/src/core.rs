@@ -155,6 +155,8 @@ pub struct Core {
     api_keys: Mutex<HashMap<String, Option<String>>>,
     /// 密钥是否存在的缓存(只查存在性,不读内容,不触发钥匙串授权)
     key_presence: Mutex<HashMap<String, bool>>,
+    /// 查询向量缓存(容量 64)
+    pub query_vecs: Mutex<crate::query_cache::QueryCache>,
     sink: Arc<dyn EventSink>,
     /// 唤醒后台 Worker
     pub wake: Notify,
@@ -200,6 +202,7 @@ impl Core {
             cloud_http: build_cloud_http(),
             api_keys: Mutex::new(HashMap::new()),
             key_presence: Mutex::new(HashMap::new()),
+            query_vecs: Mutex::new(crate::query_cache::QueryCache::new(64)),
             settings: RwLock::new(settings.clone()),
             sink,
             wake: Notify::new(),

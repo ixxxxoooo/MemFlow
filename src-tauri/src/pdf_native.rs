@@ -79,9 +79,20 @@ impl PdfDoc {
     }
 
     /// 第 idx 页的 OCR 行
+    ///
+    /// Vision 在多线程同时识别时会偶发失败,且各线程争抢神经引擎反而更慢,
+    /// 因此全进程串行执行 OCR,并在失败时重试一次。
     pub fn page_ocr_lines(&self, idx: usize) -> Result<Vec<OcrLine>> {
-        let json = Self::take_string(unsafe { ffi::mf_pdf_page_ocr_json(self.handle, idx as _) })
-            .ok_or_else(|| AppError::Parse(format!("第 {} 页 OCR 失败", idx + 1)))?;
+        static OCR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = OCR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut json = None;
+        for _ in 0..2 {
+            json = Self::take_string(unsafe { ffi::mf_pdf_page_ocr_json(self.handle, idx as _) });
+            if json.is_some() {
+                break;
+            }
+        }
+        let json = json.ok_or_else(|| AppError::Parse(format!("第 {} 页 OCR 失败", idx + 1)))?;
         parse_ocr_json(&json)
     }
 

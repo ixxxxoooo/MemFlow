@@ -209,6 +209,7 @@ export interface StoredMessage {
 
 export type ChatEvent =
   | { event: "session"; data: { sessionId: number } }
+  | { event: "stage"; data: { stage: "rewrite" | "retrieve" | "rerank" | "generate" } }
   | { event: "sources"; data: { sources: Source[] } }
   | { event: "token"; data: { text: string } }
   | { event: "done"; data: { messageId: number; answer: string; stopped: boolean; meta: AnswerMeta | null } };

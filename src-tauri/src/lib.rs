@@ -20,6 +20,7 @@ pub mod pdf_ingest;
 pub mod pdf_native;
 pub mod pipeline;
 pub mod prompts;
+pub mod query_cache;
 pub mod queue;
 pub mod repo;
 pub mod rerank;
@@ -116,6 +117,7 @@ pub fn run() {
             commands::cancel_item,
             commands::chat_ask,
             commands::list_chat_models,
+            commands::warm_chat,
             commands::chat_cancel,
             commands::list_sessions,
             commands::get_session_messages,
