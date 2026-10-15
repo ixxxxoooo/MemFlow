@@ -3,7 +3,7 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
-  AppStatus, CaptureResult, ChatEvent, ItemDetail, ItemFilter, Item, PullProgress,
+  AppStatus, CaptureResult, ChatEvent, ChatModelOption, ItemDetail, ItemFilter, Item, PullProgress,
   RerankModel, Session, Settings, StoredMessage, TagCount,
 } from "./types";
 
@@ -39,10 +39,13 @@ export const api = {
     return call<void>("download_rerank_model", { id, onProgress: ch });
   },
   /** 保存云端 API Key 到系统钥匙串,空串表示清除 */
-  setLlmApiKey: (key: string) => call<void>("set_llm_api_key", { key }),
+  setLlmApiKey: (key: string, profileId: string | null = null) =>
+    call<void>("set_llm_api_key", { key, profileId }),
   /** 测试云端连接;key 为空时使用已保存的密钥 */
-  testLlmConnection: (baseUrl: string, model: string, key: string | null) =>
-    call<string>("test_llm_connection", { baseUrl, model, key }),
+  testLlmConnection: (baseUrl: string, model: string, key: string | null, profileId: string | null = null) =>
+    call<string>("test_llm_connection", { baseUrl, model, key, profileId }),
+  /** 对话可选的模型(本地已安装 + 已配置密钥的云端) */
+  listChatModels: () => call<ChatModelOption[]>("list_chat_models"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (settings: Settings) => call<void>("update_settings", { settings }),
   captureSubmit: (text: string | null, paths: string[]) =>
@@ -66,10 +69,10 @@ export const api = {
   reindexAi: (ids: number[]) => call<number>("reindex_ai", { ids }),
   retryFailed: (ids: number[] | null) => call<number>("retry_failed", { ids }),
   cancelItem: (id: number) => call<void>("cancel_item", { id }),
-  chatAsk: (sessionId: number | null, question: string, onEvent: (e: ChatEvent) => void) => {
+  chatAsk: (sessionId: number | null, question: string, modelRef: string | null, onEvent: (e: ChatEvent) => void) => {
     const ch = new Channel<ChatEvent>();
     ch.onmessage = onEvent;
-    return call<void>("chat_ask", { sessionId, question, onEvent: ch });
+    return call<void>("chat_ask", { sessionId, question, modelRef, onEvent: ch });
   },
   chatCancel: () => call<void>("chat_cancel"),
   listSessions: () => call<Session[]>("list_sessions"),

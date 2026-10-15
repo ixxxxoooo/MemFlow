@@ -38,3 +38,4 @@ export const CheckIcon = (p: P) => <I {...p}><path d="m5 12 5 5 9-10" /></I>;
 export const AlertIcon = (p: P) => <I {...p}><path d="M12 3 2 20h20L12 3ZM12 10v4M12 17.500v.01" /></I>;
 export const SidebarRightIcon = (p: P) => <I {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></I>;
 export const EditIcon = (p: P) => <I {...p}><path d="M4 20h4L19 9l-4-4L4 16v4ZM13.500 6.500l4 4" /></I>;
+export const ChevronDownIcon = (p: P) => <I {...p}><path d="m6 9 6 6 6-6" /></I>;

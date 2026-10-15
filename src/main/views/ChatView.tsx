@@ -3,12 +3,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { confirmDialog } from "../../lib/confirm";
-import { fmtDate } from "../../lib/format";
+import { fmtDate, fmtDuration } from "../../lib/format";
 import { useChat } from "../../lib/chatStore";
 import { useApp } from "../../lib/store";
 import type { Source } from "../../lib/types";
 import { HistoryIcon, PlusIcon, SendIcon, SparkleIcon, StopIcon, TrashIcon } from "../components/icons";
+import { BrandIcon } from "../components/BrandIcon";
 import { Markdown } from "../components/Markdown";
+import { ModelPicker } from "../components/ModelPicker";
 
 const SUGGESTIONS = [
   "最近我都记录了哪些事?帮我按时间梳理一下",
@@ -115,6 +117,15 @@ export function ChatView() {
                   ) : null}
                   {m.streaming && !m.content && <div className="text-sm text-[var(--fg-dim)]">正在检索并思考<span className="typing-dot" /></div>}
                   {m.error && <div className="mt-2 rounded-lg bg-[var(--err)]/10 px-3 py-2 text-[13px] text-[var(--err)]">{m.error}</div>}
+                  {m.meta && !m.streaming && (
+                    <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-[var(--fg-faint)]" title="回答所用模型与耗时">
+                      <BrandIcon model={m.meta.model} preset={m.meta.preset} provider={m.meta.provider} size={14} />
+                      <span className="text-[var(--fg-dim)]">{m.meta.model}</span>
+                      <span>·</span>
+                      <span>总耗时 {fmtDuration(m.meta.elapsedMs)}</span>
+                      {m.meta.firstTokenMs != null && (<><span>·</span><span>首字 {fmtDuration(m.meta.firstTokenMs)}</span></>)}
+                    </div>
+                  )}
                   {m.sources.length > 0 && !m.streaming && (
                     <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11.5px]">
                       <span className="text-[var(--fg-faint)]">引用来源</span>
@@ -135,7 +146,8 @@ export function ChatView() {
       </div>
 
       <div className="px-6 pb-5">
-        <div className="mx-auto flex max-w-[760px] items-end gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg-elev)] p-2 shadow-sm focus-within:border-[var(--accent)]">
+        <div className="mx-auto flex max-w-[760px] items-end gap-1 rounded-2xl border border-[var(--line)] bg-[var(--bg-elev)] p-2 shadow-sm focus-within:border-[var(--accent)]">
+          <ModelPicker />
           <textarea
             ref={taRef}
             rows={1}

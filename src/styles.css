@@ -187,3 +187,8 @@ textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-se
   background: transparent;
 }
 .mf-editor .milkdown .ProseMirror { padding: 8px 4px 40px; outline: none; }
+
+/* 黑色单色品牌图标:深色主题下反相,保证可见 */
+@media (prefers-color-scheme: dark) {
+  .brand-mono { filter: invert(1); }
+}

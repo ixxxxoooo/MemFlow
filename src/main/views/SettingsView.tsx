@@ -9,6 +9,7 @@ import { findPreset, LLM_PRESETS } from "../../lib/llmPresets";
 import { eventToAccelerator, prettyAccelerator } from "../../lib/shortcut";
 import { useApp } from "../../lib/store";
 import type { Settings } from "../../lib/types";
+import { ProfilesEditor } from "../components/ProfilesEditor";
 import { PullControls } from "../components/PullControls";
 import { RerankControls } from "../components/RerankControls";
 import type { RerankModel } from "../../lib/types";
@@ -177,6 +178,13 @@ export function SettingsView() {
               ) : (
                 <Row label="本地文本模型" hint="负责问答、摘要、打标签、流程图,如 qwen2.5:7b。下载见下方「本地模型」。"><input className={inputCls} value={form.textModel} onChange={(e) => set("textModel", e.target.value)} /></Row>
               )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">更多云端模型(问答中可切换)</h3>
+            <div className="rounded-2xl border border-[var(--line)] px-5">
+              <ProfilesEditor profiles={form.llmProfiles} onChange={(next) => set("llmProfiles", next)} />
             </div>
           </section>
 

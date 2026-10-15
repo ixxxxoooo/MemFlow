@@ -82,6 +82,37 @@ export interface Settings {
   rerankModel: string;
   /** 重排序模型下载镜像 */
   hfMirror: string;
+  /** 额外的云端模型档案(对话里可切换) */
+  llmProfiles: LlmProfile[];
+}
+
+/** 额外的云端模型档案;密钥单独存放在钥匙串 */
+export interface LlmProfile {
+  id: string;
+  name: string;
+  /** 预设标识,用于挑选图标 */
+  preset: string;
+  baseUrl: string;
+  model: string;
+}
+
+/** 对话可选的模型 */
+export interface ChatModelOption {
+  /** 引用标识:ollama:<名> / cloud:default / cloud:<档案 id> */
+  ref: string;
+  provider: "ollama" | "openai_compat";
+  label: string;
+  model: string;
+  preset: string | null;
+}
+
+/** 一次回答的模型与耗时信息 */
+export interface AnswerMeta {
+  model: string;
+  provider: string;
+  preset?: string | null;
+  elapsedMs: number;
+  firstTokenMs: number | null;
 }
 
 export interface RerankModel {
@@ -132,6 +163,8 @@ export interface AppStatus {
   vectorCount: number;
   /** 是否已配置云端 API Key(密钥不会返回前端) */
   hasApiKey: boolean;
+  /** 已保存密钥的额外档案 id */
+  keyedProfiles: string[];
 }
 
 export interface TagCount {
@@ -158,6 +191,8 @@ export interface Session {
   id: number;
   title: string;
   updatedAt: number;
+  /** 该会话最近一次使用的模型引用 */
+  modelRef: string | null;
 }
 
 export interface StoredMessage {
@@ -166,13 +201,17 @@ export interface StoredMessage {
   content: string;
   sources: Source[] | null;
   createdAt: number;
+  model: string | null;
+  provider: string | null;
+  elapsedMs: number | null;
+  firstTokenMs: number | null;
 }
 
 export type ChatEvent =
   | { event: "session"; data: { sessionId: number } }
   | { event: "sources"; data: { sources: Source[] } }
   | { event: "token"; data: { text: string } }
-  | { event: "done"; data: { messageId: number; answer: string; stopped: boolean } };
+  | { event: "done"; data: { messageId: number; answer: string; stopped: boolean; meta: AnswerMeta | null } };
 
 export interface PullProgress {
   status: string;

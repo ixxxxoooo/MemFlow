@@ -1,6 +1,7 @@
 // @author ygw
 // 左栏:导航 + Ollama 状态呼吸灯 + 后台队列状态
 
+import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
 import { ChatIcon, LibraryIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
 
@@ -13,11 +14,15 @@ const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
 export function Sidebar() {
   const { view, setView, status, queue } = useApp();
   const running = status?.ollamaRunning ?? false;
-  const textModel = status?.settings.textModel ?? "";
+  // 当前问答实际使用的模型(跟随输入框旁的切换)
+  const { modelRef, models } = useChat();
+  const ref = effectiveRef(modelRef, models, status?.settings);
+  const current = models.find((m) => m.ref === ref);
+  const textModel = current?.label ?? (status?.settings.llmProvider === "openai_compat" ? status.settings.llmModel : status?.settings.textModel) ?? "";
   const missing = status?.models.filter((m) => m.required && !m.installed) ?? [];
 
   let dot = "var(--ok)";
-  let label = `Ollama 运行中 · ${textModel}`;
+  let label = `Ollama 运行中 · 问答 ${textModel}`;
   if (!status) {
     dot = "var(--fg-faint)";
     label = "正在检测 Ollama…";

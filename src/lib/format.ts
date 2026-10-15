@@ -51,3 +51,11 @@ export function toBase64(text: string): string {
   bytes.forEach((b) => (bin += String.fromCharCode(b)));
   return btoa(bin);
 }
+
+/** 耗时格式化:<1s 显示毫秒,否则保留一位小数的秒,超过一分钟显示 m分s秒 */
+export function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}分${s % 60}秒`;
+}
