@@ -25,7 +25,8 @@ pub const WORKER_FLAG: &str = "--ocr-worker";
 const REPLY_TIMEOUT: Duration = Duration::from_secs(150);
 /// 单页最多尝试次数(每次失败都换新进程)
 const MAX_ATTEMPTS: usize = 5;
-/// 子进程空闲多久后自行退出
+/// 子进程空闲多久后自行退出(仅 macOS 有 OCR 子进程)
+#[cfg(target_os = "macos")]
 const IDLE_EXIT: Duration = Duration::from_secs(90);
 
 /// 子进程识别结果

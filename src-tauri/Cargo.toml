@@ -1,6 +1,6 @@
 [package]
 name = "memflow"
-version = "0.1.0"
+version = "0.2.0"
 description = "MemFlow - 本地 AI 第二大脑"
 authors = ["ixxxxoooo"]
 license = "MIT"

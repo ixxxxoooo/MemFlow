@@ -4,14 +4,14 @@
 
 # MemFlow
 
-**本地优先的 Mac AI 第二大脑 · 重输入、轻管理**
+**本地优先的跨平台 AI 第二大脑(macOS · Windows · Linux)· 重输入、轻管理**
 
 随手记下一句话、一张截图、一份文档,本地 Ollama 在后台自动理解、打标签、向量化;需要时用对话取回,回答 100% 带可追溯来源。
 
 [![CI](https://github.com/ixxxxoooo/MemFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/ixxxxoooo/MemFlow/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ixxxxoooo/MemFlow)](https://github.com/ixxxxoooo/MemFlow/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-macOS%2012%2B-lightgrey)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 [English](#english) · [下载](#下载与安装) · [快速开始](#快速开始) · [贡献](CONTRIBUTING.md)
 
@@ -19,13 +19,13 @@
 
 ## 特性
 
-- **闪念胶囊与记一笔**:全局快捷键(默认 `Cmd+Shift+K`)唤起 Spotlight 风格输入框;回车保存、`Cmd+V` 粘贴截图、拖入文件;失焦自动收起,托盘常驻。主界面侧栏有常驻的「记一笔」按钮(`⌘N`),两者都存入默认知识库。
+- **闪念胶囊与记一笔**:全局快捷键(macOS 默认 `Cmd+Shift+K`,Windows / Linux 为 `Ctrl+Shift+K`)唤起 Spotlight 风格输入框;回车保存、粘贴截图、拖入文件;失焦自动收起,托盘常驻。主界面侧栏有常驻的「记一笔」按钮(macOS `⌘N` / Windows、Linux `Ctrl+N`),两者都存入默认知识库。
 - **全本地(默认)**:嵌入 `bge-m3`、文本 `qwen2.5:7b`、视觉 `minicpm-v`(默认关闭),数据与推理都不出本机。
 - **可选云端模型**:文本、向量、视觉模型都可以分别选择本地 Ollama 或云端 OpenAI 兼容接口(如 DeepSeek、通义、硅基流动),全部选云端即可免下载本地模型;原始数据与向量索引始终留在本机(见下文隐私说明)。
 - **混合检索**:向量 + FTS5(jieba 中文分词)→ RRF 融合 → 本地 ONNX 重排序(可选,设置页一键下载)→ 时效加权 → 相关度门槛。
 - **可溯源问答**:只依据你的记录回答,`[n]` 角标可点击,右侧抽屉查看原文;无相关资料时直接拒答,不编造。
 - **Mermaid 流程图**:校验 → 自动修复 → 缩放拖拽 → 导出 SVG/PNG。
-- **文档导入**:txt / md / pdf / docx / pptx / xlsx / csv / html / epub / rtf(详见下方格式表),自动分块并生成全局摘要;macOS 上扫描版 PDF 经本机 OCR、表格还原为 Markdown,来源标注页码;多文档并发入库。
+- **文档导入**:txt / md / pdf / docx / pptx / xlsx / csv / html / epub / rtf(详见下方格式表),自动分块并生成全局摘要;macOS 上扫描版 PDF 经本机 OCR(其它平台可用视觉模型代替)、表格还原为 Markdown,来源标注页码;多文档并发入库。
 - **多知识库**:「知识档案库」先是知识库列表(新建、改名与描述、删除),点进去才是库内文档;导入固定到当前打开的库。提问时在输入框左上方的范围选择器里多选知识库(不选 = 搜索全部),文档可批量转移到其他库。导入入口会提示支持的格式。
 - **图文关联**:文档里的图片自动入库并关联,本机 OCR 识别图中文字并入对应切片,搜图中的文字也能命中文档。
 - **AI 整理**:单条笔记一键整理(预览、确认、可撤销);按语义相似度把零散碎片归并成带来源编号的主题笔记,原记录保留。
@@ -34,27 +34,45 @@
 
 ## 下载与安装
 
-前往 [Releases](https://github.com/ixxxxoooo/MemFlow/releases/latest) 下载对应架构的 `.dmg`:
+前往 [Releases](https://github.com/ixxxxoooo/MemFlow/releases/latest) 下载对应平台的安装包:
 
-| 芯片 | 文件 |
+| 平台 | 文件 |
 | --- | --- |
-| Apple Silicon (M 系列) | `MemFlow_<版本>_aarch64.dmg` |
-| Intel | `MemFlow_<版本>_x64.dmg` |
+| macOS · Apple Silicon (M 系列) | `MemFlow_<版本>_aarch64.dmg` |
+| macOS · Intel | `MemFlow_<版本>_x64.dmg` |
+| Windows 10 / 11 · x64 | `MemFlow_<版本>_x64-setup.exe`(NSIS 安装包,安装到当前用户,无需管理员) |
+| Linux | 暂不提供安装包,请[从源码构建](#从源码构建)(CI 每次提交都会在 Linux 上编译并跑测试) |
 
-每个版本附带 `SHA256SUMS.txt`,可用 `shasum -a 256 -c SHA256SUMS.txt` 校验。
+每个版本附带 `SHA256SUMS.txt`,可校验下载完整性(macOS:`shasum -a 256 -c SHA256SUMS.txt`;Linux:`sha256sum -c`;Windows PowerShell:`Get-FileHash <文件>` 与清单比对)。
 
-> **关于签名**:当前发布包使用 ad-hoc 签名,未经过 Apple 公证。首次打开如被 Gatekeeper 拦截,请在「访达」中右键 → 打开,或执行:
+> **关于签名**:发布包没有购买代码签名证书。
 >
-> ```bash
-> xattr -cr /Applications/MemFlow.app
-> ```
+> - **macOS**:ad-hoc 签名,未经 Apple 公证。首次打开如被 Gatekeeper 拦截,请在「访达」中右键 → 打开,或执行:
+>
+>   ```bash
+>   xattr -cr /Applications/MemFlow.app
+>   ```
+>
+> - **Windows**:未做代码签名,SmartScreen 提示「已保护你的电脑」时点「更多信息 → 仍要运行」。安装包会在需要时自动下载 WebView2 运行时(Windows 11 已自带)。
+
+### 平台差异
+
+| 能力 | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| 问答、检索、笔记、文档导入(文本类格式)、AI 整理、云端模型 | ✅ | ✅ | ✅ |
+| 本机 OCR(扫描版 PDF、图中文字) | ✅ PDFKit + Vision | ❌ 可用「视觉模型」解析 PDF | ❌ 同左 |
+| 窗口毛玻璃效果 | ✅ | 实色窗口 | 实色窗口 |
+| API Key 存储 | 钥匙串 | 凭据管理器 | Secret Service(GNOME Keyring / KWallet) |
+| 全局快捷键默认值 | `Cmd+Shift+K` | `Ctrl+Shift+K` | `Ctrl+Shift+K` |
+| 数据目录 | `~/Library/Application Support/MemFlow` | `%LOCALAPPDATA%\MemFlow` | `~/.local/share/MemFlow` |
+| 日志目录 | `~/Library/Logs/MemFlow` | `%LOCALAPPDATA%\MemFlow\logs` | `~/.memflow/logs` |
 
 ## 支持的文档格式
 
 | 格式 | 解析方式 |
 | --- | --- |
 | `.md` `.markdown` `.txt` | 直接读取;md 里的相对路径图片自动关联 |
-| `.pdf` | 文本层 + 扫描页本机 OCR(macOS)、表格还原为 Markdown、页码;可选视觉模型 |
+| `.pdf` | 文本层 + 扫描页本机 OCR(仅 macOS)、表格还原为 Markdown、页码;可选视觉模型(全平台) |
 | `.docx` | 标题层级、表格(含合并单元格、嵌套表格)、内嵌图片 |
 | `.pptx` | 按幻灯片提取标题/正文/备注,幻灯片图片自动关联 |
 | `.xlsx` | 每个工作表转 Markdown 表格(识别日期),大表分块时重复表头 |
@@ -62,13 +80,13 @@
 | `.html` `.htm` | 提取正文与标题层级,`<img>` 相对路径图片自动关联 |
 | `.epub` | 按目录顺序提取章节,章节插图自动关联 |
 | `.rtf` | 提取文字(含中文代码页) |
-| 图片 `.png` `.jpg` `.webp` `.gif` `.bmp` | 本机 OCR 识别图中文字;可选视觉模型描述 |
+| 图片 `.png` `.jpg` `.webp` `.gif` `.bmp` | 本机 OCR 识别图中文字(仅 macOS);可选视觉模型描述(全平台) |
 
 暂不支持旧版 `.doc` / `.ppt` / `.xls`(请先另存为新格式)。导入文件夹时会递归处理以上格式,并跳过隐藏文件与 `node_modules`、`.git` 等目录。
 
 ## 快速开始
 
-1. 安装并启动 [Ollama](https://ollama.com)。
+1. 安装并启动 [Ollama](https://ollama.com)(macOS / Windows / Linux 均支持;只用云端模型则可跳过,见下文「使用云端模型」)。
 2. 打开 MemFlow,顶部横幅会提示缺失的模型,点击「一键下载」(`bge-m3` 约 1.2GB,`qwen2.5:7b` 约 4.7GB)。
    - 若系统代理(如 Quantumult X)使用 fake-ip(`198.18.x.x`)导致 `ollama pull` 报 `redirect target not allowed`,在「设置 → 模型状态与下载」点「**直连下载**」即可;也可用终端脚本 [`scripts/pull_model_manual.sh`](scripts/pull_model_manual.sh):
      ```bash
@@ -77,7 +95,7 @@
      # 网络受限时可指定镜像仓库
      OLLAMA_REGISTRY=https://你的镜像地址 scripts/pull_model_manual.sh qwen2.5:7b
      ```
-3. 按 `Cmd+Shift+K` 记下第一条想法,然后到「AI 问答」里提问。
+3. 按 `Cmd+Shift+K`(Windows / Linux 为 `Ctrl+Shift+K`)记下第一条想法,然后到「AI 问答」里提问。
 
 ### 圈x(Quantumult X)用户:让 Ollama 域名不走 fake-ip
 
@@ -113,30 +131,39 @@ curl -I https://registry.ollama.ai/v2/   # 能返回 HTTP 状态码即连通
 
 ### 使用云端模型(可选)
 
-在「设置 → 文本模型来源」选择「云端 API」,挑选服务商预设(如 DeepSeek),填入 API Key,点「测试连接」后保存即可。API Key 输入框右侧的眼睛图标可查看明文(已保存的密钥需要钥匙串授权,10 秒后自动隐藏)。
+在「设置 → 文本模型来源」选择「云端 API」,挑选服务商预设(如 DeepSeek),填入 API Key,点「测试连接」后保存即可。API Key 输入框右侧的眼睛图标可查看明文(已保存的密钥需要系统凭据库授权,10 秒后自动隐藏)。
 
 - 文本模型:问答、查询改写、自动打标签、流程图修复使用云端模型。
 - 向量模型与视觉模型:在「设置 → 向量与视觉模型」分别选择「本地(Ollama)」或「云端(OpenAI 兼容)」,云端时选一个已配置的云端档案并填模型名(如向量 `text-embedding-v3` / `BAAI/bge-m3`,视觉 `qwen-vl-plus`),可点「测试」验证。DeepSeek 官方没有 embedding 接口,向量请选通义、硅基流动、OpenAI 等。
 - **更换向量来源后旧向量不再参与检索**(不同模型的向量空间不兼容),顶部会提示「全库重刷」。
 - **隐私**:云端文本模型会收到你的提问与检索到的资料片段;云端向量模型会收到笔记与文档的文本片段;云端视觉模型会收到图片与 PDF 页面图像。原始数据和向量索引仍只保存在本机。资料敏感时请使用本地模型。
-- API Key 保存在 macOS 钥匙串,不写入数据库,也不会包含在备份中。
+- API Key 保存在系统凭据库(macOS 钥匙串 / Windows 凭据管理器 / Linux Secret Service),不写入数据库,也不会包含在备份中。Linux 需要运行中的 Secret Service(如 GNOME Keyring),否则密钥只在本次运行有效。
 
 ### 应用内快捷键
 
+macOS 用 `⌘`,Windows / Linux 用 `Ctrl`。
+
 | 快捷键 | 功能 |
 | --- | --- |
-| `⌘ ,` | 打开设置 |
-| `⌘ N` | 记一笔 |
-| `⌘ 1` / `⌘ 2` / `⌘ 3` | AI 问答 / 记忆时间流 / 知识档案库 |
+| `⌘ ,` / `Ctrl+,` | 打开设置 |
+| `⌘ N` / `Ctrl+N` | 记一笔 |
+| `⌘ 1` / `⌘ 2` / `⌘ 3`(Windows、Linux:`Ctrl+1/2/3`) | AI 问答 / 记忆时间流 / 知识档案库 |
 
 ## 从源码构建
 
-环境要求:macOS 12+、Rust stable、Node.js ≥ 20、pnpm。
+通用要求:Rust(版本见 `src-tauri/rust-toolchain.toml`)、Node.js ≥ 20、pnpm。
+
+| 平台 | 额外准备 |
+| --- | --- |
+| macOS 12+ | Xcode Command Line Tools(`xcode-select --install`) |
+| Windows 10/11 | [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)(勾选「使用 C++ 的桌面开发」)、WebView2(Win11 自带) |
+| Linux | `build-essential pkg-config libssl-dev libdbus-1-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf`(Debian/Ubuntu 包名) |
 
 ```bash
 pnpm install
-pnpm tauri dev        # 开发运行
-pnpm tauri build      # 产出 .app 与 .dmg(位于 src-tauri/target/release/bundle)
+pnpm tauri dev                    # 开发运行
+pnpm tauri build                  # 产出当前平台安装包(位于 src-tauri/target/release/bundle)
+pnpm tauri build --bundles dmg    # macOS 仅 dmg;Windows 用 --bundles nsis
 
 # 测试
 pnpm test                         # 前端 vitest
@@ -145,11 +172,13 @@ cd src-tauri && cargo test        # Rust 单元 + mock Ollama 集成测试
 cd src-tauri && cargo test --test e2e_real_ollama -- --ignored --nocapture
 ```
 
+平台相关配置:`src-tauri/tauri.conf.json` 为跨平台基础配置,`src-tauri/tauri.macos.conf.json` 在 macOS 上覆盖(透明毛玻璃窗口、dmg、ad-hoc 签名)。适配细节与取舍见 [`docs/跨平台适配说明.md`](docs/跨平台适配说明.md)。
+
 ## 架构概览
 
 Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后端经 `EventSink` 与 UI 解耦,可在无窗口环境下完整测试。
 
-- 存储:SQLite(WAL)+ FTS5 + 内存余弦向量索引(按嵌入模型隔离),数据位于 `~/Library/Application Support/MemFlow/`。
+- 存储:SQLite(WAL)+ FTS5 + 内存余弦向量索引(按嵌入模型隔离),数据位置见上文「平台差异」(macOS 为 `~/Library/Application Support/MemFlow/`)。
 - 队列:持久化任务、崩溃恢复、指数退避;Ollama 离线或模型缺失仅重排不耗次数。
 - 多知识库:`items.kb_id` + 向量块 kb_id,检索与向量扫描都在范围内硬过滤;转移只改归属,无需重新嵌入。
 - 图文关联:`item_links` 记录文档与图片的多对多关系,图中文字(本机 OCR)并入所在切片。
@@ -162,11 +191,12 @@ Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后�
 
 ## 已知限制
 
-- 胶囊在其他应用的全屏 Space 上可能不显示(未使用 NSPanel)。
-- PDF 的 OCR / 表格还原目前仅 macOS 可用(PDFKit + Vision);其它平台回退为纯文本层。文本层 PDF 中的表格仅做段落重排,需要高精度表格可在设置里切换「视觉模型」解析模式。视觉模型默认关闭。
+- 胶囊在 macOS 其他应用的全屏 Space 上可能不显示(未使用 NSPanel)。
+- Windows / Linux 版为首次适配,主要通过 CI 编译与自动化测试验证,欢迎在 Issue 反馈平台相关问题。
+- PDF 的 OCR / 表格还原目前仅 macOS 可用(PDFKit + Vision);其它平台回退为纯文本层,扫描版 PDF 请在设置里启用「视觉模型」解析。文本层 PDF 中的表格仅做段落重排,需要高精度表格可在设置里切换「视觉模型」解析模式。视觉模型默认关闭。
 - 图中文字的本机 OCR 仅 macOS 可用;其它平台只保留图片与文档的关联,不识别图中文字。
 - AI 整理只支持文字笔记(文档由原文件生成,不做覆盖式整理);归并一次最多 12 条、总计 2.4 万字,需在同一知识库内。
-- 发布包为 ad-hoc 签名,未公证(见上文)。
+- 发布包未做代码签名(macOS ad-hoc、Windows 无签名,见上文)。
 
 ## 参与贡献
 
@@ -180,16 +210,18 @@ Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后�
 
 ## English
 
-**MemFlow** is a local-first "AI second brain" for macOS. Capture a thought, a screenshot or a document in one keystroke; a local [Ollama](https://ollama.com) instance understands, tags and indexes it in the background. Ask questions later and get answers with 100% traceable citations - or an honest refusal when nothing relevant is stored.
+**MemFlow** is a local-first, cross-platform "AI second brain" (macOS · Windows · Linux). Capture a thought, a screenshot or a document in one keystroke; a local [Ollama](https://ollama.com) instance understands, tags and indexes it in the background. Ask questions later and get answers with 100% traceable citations - or an honest refusal when nothing relevant is stored.
 
-- Global quick-capture capsule (`Cmd+Shift+K`), tray resident
+- Global quick-capture capsule (`Cmd+Shift+K` on macOS, `Ctrl+Shift+K` on Windows/Linux), tray resident
 - Fully local: `bge-m3` embeddings + `qwen2.5:7b` chat (+ optional `minicpm-v` vision)
 - Hybrid retrieval (vectors + FTS5 with Chinese tokenization, RRF fusion)
 - Verified `[n]` citations, Mermaid flowcharts with auto-repair and SVG/PNG export
 - Robust by design: raw data is persisted first, AI processing is async, retryable and crash-safe
 
-**Install**: download the `.dmg` for your chip from [Releases](https://github.com/ixxxxoooo/MemFlow/releases/latest). Builds are ad-hoc signed (not notarized); if Gatekeeper blocks the app, right-click → Open or run `xattr -cr /Applications/MemFlow.app`.
+**Install**: download the installer for your platform from [Releases](https://github.com/ixxxxoooo/MemFlow/releases/latest): `.dmg` (macOS, Apple Silicon / Intel) or `-setup.exe` (Windows 10/11 x64). Linux: build from source. Builds are not code-signed: on macOS, right-click → Open or run `xattr -cr /Applications/MemFlow.app`; on Windows, SmartScreen → More info → Run anyway.
 
-**Build**: `pnpm install && pnpm tauri build` (requires Rust stable, Node ≥ 20, pnpm, macOS 12+).
+**Platform notes**: local OCR (scanned PDFs, text in images) is macOS-only; on other platforms use a vision model instead. API keys live in the OS credential store (Keychain / Credential Manager / Secret Service).
+
+**Build**: `pnpm install && pnpm tauri build` (requires Rust, Node ≥ 20, pnpm, plus Xcode CLT / VS Build Tools / WebKitGTK dev packages - see the Chinese section above).
 
 Licensed under the [MIT License](LICENSE).

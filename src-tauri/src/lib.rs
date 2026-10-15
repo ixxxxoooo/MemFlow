@@ -65,7 +65,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(windows::shortcut_plugin())
         .setup(|app| {
-            let root = app.path().data_dir()?.join("MemFlow");
+            // 数据库与向量索引体积大且不应漫游同步:Windows 用 %LOCALAPPDATA%,
+            // macOS 为 ~/Library/Application Support,Linux 为 ~/.local/share
+            let root = app.path().local_data_dir()?.join("MemFlow");
             let paths = AppPaths::new(root)?;
             let db = Db::open(&paths.db_path, Some(&paths.backups))?;
             let core = Core::new(paths, db, Arc::new(TauriSink(app.handle().clone())))?;

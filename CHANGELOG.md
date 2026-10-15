@@ -5,7 +5,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
 ### 新增
+
+- **全平台支持**:新增 Windows 10/11(x64,NSIS 安装包)适配,Linux 可从源码构建;CI 在 macOS / Windows / Linux 三平台编译、clippy 与测试,Release 工作流同时产出 Apple Silicon dmg、Intel dmg 与 Windows 安装包。
+  - API Key 按平台使用系统凭据库(macOS 钥匙串 / Windows 凭据管理器 / Linux Secret Service);凭据库不可用时密钥仅在本次运行有效并提示。
+  - Ollama 自动发现与启动覆盖 PATH 与各平台常见安装位置(Windows 隐藏控制台窗口)。
+  - 数据目录 Windows 使用 `%LOCALAPPDATA%\MemFlow`;日志目录按平台区分。
+  - 非 macOS 使用实色窗口与系统默认标题栏,托盘使用应用图标;界面快捷键文案按平台显示 `⌘` 或 `Ctrl`,全局胶囊快捷键默认 Windows / Linux 为 `Ctrl+Shift+K`。
+  - Tauri 配置拆分为跨平台基础配置与 `tauri.macos.conf.json`。
 
 - **向量与视觉模型可选云端**:设置里向量、视觉模型各自选择「本地(Ollama)」或「云端(OpenAI 兼容)」,云端时复用已配置的云端档案并指定模型名,带「测试」按钮与隐私确认;云端向量走 `/embeddings`(自动分批、按 index 对齐),云端视觉以 data URL 发送图片。向量来源标识为 `cloud:档案:模型`,更换后旧向量判为过期并提示全库重刷;全部选云端时不再提示启动 Ollama。
 - **记一笔**:侧栏常驻「记一笔」按钮与 `⌘N`,应用内对话框存入默认知识库(支持附件、粘贴截图、拖入文件);时间流也有入口。闪念胶囊不再选择知识库,固定存入默认库。
@@ -50,6 +59,15 @@
 - `scripts/pull_model_manual.sh` 不再依赖 python3,支持 `OLLAMA_REGISTRY` 镜像、`名称:标签` 与 `命名空间/名称` 写法,并正确处理续传时的 416。
 - 启用 HTTPS 支持(此前 HTTP 客户端未启用 TLS,无法访问 `https://` 地址)。
 
+### 变更
+
+- 项目主页与作者信息统一为 GitHub 用户名 `ixxxxoooo`;应用标识改为 `com.ixxxxoooo.memflow`(macOS 上会自动迁移旧钥匙串条目)。
+
+### 已知限制(跨平台)
+
+- 本机 OCR(扫描版 PDF、图中文字)与窗口毛玻璃仅 macOS 可用;其它平台请使用视觉模型。
+- Windows 安装包未代码签名,SmartScreen 会提示「未知发布者」。
+
 ## [0.1.0] - 2026-10-15
 
 首个公开版本。
@@ -79,5 +97,6 @@
 - 扫描版 PDF 无 OCR;视觉模型默认关闭。
 - 发布包为 ad-hoc 签名,未经 Apple 公证。
 
-[Unreleased]: https://github.com/ixxxxoooo/MemFlow/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ixxxxoooo/MemFlow/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ixxxxoooo/MemFlow/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ixxxxoooo/MemFlow/releases/tag/v0.1.0

@@ -4,7 +4,8 @@
 
 ## 开发环境
 
-- macOS 12+、Rust stable、Node.js ≥ 20、pnpm(版本见 `package.json` 的 `packageManager`)
+- macOS 12+ / Windows 10+ / Linux(各平台额外依赖见 [README「从源码构建」](README.md#从源码构建))、Rust(版本见 `src-tauri/rust-toolchain.toml`)、Node.js ≥ 20、pnpm(版本见 `package.json` 的 `packageManager`)
+- 涉及平台差异的代码请用 `#[cfg(target_os = ...)]` 隔离,并保证其它平台能编译;CI 会在 macOS / Windows / Linux 三个平台跑 clippy 与测试。
 - 本机运行 [Ollama](https://ollama.com) 仅在真机冒烟测试和手动体验时需要;单元/集成测试使用 mock Ollama,无需模型。
 
 ```bash
@@ -49,8 +50,8 @@ docs: 补充 fake-ip 环境下的模型拉取说明
 1. 同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 的版本号,更新 `CHANGELOG.md`。
 2. 提交并推送到 `main`,等待 CI 通过。
 3. 打 tag 并推送:`git tag -a vX.Y.Z -m "MemFlow vX.Y.Z" && git push origin vX.Y.Z`。
-4. `Release` 工作流会自动构建 Apple Silicon 与 Intel 的 `.dmg`,生成 `SHA256SUMS.txt` 并发布 GitHub Release。
+4. `Release` 工作流会自动构建 Apple Silicon 与 Intel 的 `.dmg`、Windows x64 的 `-setup.exe`,生成 `SHA256SUMS.txt` 并发布 GitHub Release(缺少任一安装包则不发布,保持草稿)。
 
 ## 报告问题
 
-请使用 Issue 模板,并附上 macOS 版本、芯片架构、MemFlow 版本与 Ollama 版本。安全相关问题请勿公开提 Issue,见 [SECURITY.md](SECURITY.md)。
+请使用 Issue 模板,并附上操作系统与版本、芯片架构、MemFlow 版本与 Ollama 版本。安全相关问题请勿公开提 Issue,见 [SECURITY.md](SECURITY.md)。
