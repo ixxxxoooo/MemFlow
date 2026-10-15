@@ -55,6 +55,7 @@ jobs:
           awk -v v="$V" '
             $0 ~ "^## \\[" v "\\]" { found=1; next }
             found && /^## \[/ { exit }
+            found && /^\[[^]]+\]: / { next }
             found { print }
           ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > release-notes.md
           [[ -s release-notes.md ]] || { echo "::error::CHANGELOG.md 中没有 $V 的条目"; exit 1; }
