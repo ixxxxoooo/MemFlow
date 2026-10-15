@@ -10,6 +10,7 @@ pub mod error;
 pub mod extract;
 pub mod ingest;
 pub mod llm;
+pub mod logging;
 pub mod model_fetch;
 pub mod ollama;
 pub mod openai;
@@ -39,20 +40,10 @@ impl EventSink for TauriSink {
     }
 }
 
-/// 初始化日志(重复调用安全)
-fn init_logging() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "memflow_lib=info".into()),
-        )
-        .try_init();
-}
-
 /// 应用入口
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_logging();
+    logging::init();
     let app = tauri::Builder::default()
         // 重复启动时唤起已有实例的主窗口
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -116,6 +107,8 @@ pub fn run() {
             commands::hide_capsule,
             commands::resize_capsule,
             commands::notify_toast,
+            commands::log_frontend,
+            commands::open_log_dir,
         ])
         .build(tauri::generate_context!())
         .expect("构建 Tauri 应用失败");

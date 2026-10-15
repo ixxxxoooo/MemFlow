@@ -504,3 +504,23 @@ pub fn notify_toast(app: AppHandle, message: String) {
     let msg: String = message.chars().take(60).collect();
     windows::show_toast(&app, &msg);
 }
+
+/// 记录前端错误到日志文件
+#[tauri::command]
+pub fn log_frontend(level: String, message: String) {
+    crate::logging::log_frontend(&level, &message);
+}
+
+/// 用系统文件管理器打开日志目录
+#[tauri::command]
+pub fn open_log_dir() -> Result<String> {
+    let dir = crate::logging::log_dir();
+    std::fs::create_dir_all(&dir)?;
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&dir).spawn()?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer").arg(&dir).spawn()?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    std::process::Command::new("xdg-open").arg(&dir).spawn()?;
+    Ok(dir.to_string_lossy().into_owned())
+}

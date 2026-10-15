@@ -19,7 +19,7 @@ import { SettingsView } from "./views/SettingsView";
 import { TimelineView } from "./views/TimelineView";
 
 export function App() {
-  const { view, drawer, refreshStatus, setQueue, bumpData, toast, closeDrawer, closeDocModal } = useApp();
+  const { view, drawer, refreshStatus, setQueue, bumpData, itemsDeleted, toast, closeDrawer, closeDocModal } = useApp();
   const [dragging, setDragging] = useState(false);
 
   // 订阅后端事件;定时轮询 Ollama 状态
@@ -29,13 +29,13 @@ export function App() {
     const unlistens: Promise<() => void>[] = [
       listen<QueueStatus>("queue-status", (e) => { setQueue(e.payload); }),
       listen("item-updated", () => { bumpData(); }),
-      listen("item-deleted", () => { bumpData(); }),
+      listen<{ id: number }>("item-deleted", (e) => { itemsDeleted([e.payload.id]); }),
     ];
     return () => {
       clearInterval(timer);
       unlistens.forEach((p) => p.then((f) => f()));
     };
-  }, [refreshStatus, setQueue, bumpData]);
+  }, [refreshStatus, setQueue, bumpData, itemsDeleted]);
 
   // 队列从忙到空闲时刷新统计
   const busy = useApp((s) => (s.queue?.pending ?? 0) + (s.queue?.running ?? 0));

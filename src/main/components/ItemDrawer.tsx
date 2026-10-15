@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { fmtDate, fmtTime } from "../../lib/format";
+import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
 import { CloseIcon, EditIcon, RefreshIcon, TrashIcon } from "./icons";
@@ -26,7 +27,7 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 export function ItemDrawer() {
-  const { drawer, closeDrawer, toast, dataVersion, bumpData, refreshStatus } = useApp();
+  const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus } = useApp();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -41,11 +42,14 @@ export function ItemDrawer() {
       setDetail(await api.getItem(drawer.itemId));
     } catch (e) {
       setDetail(null);
-      toast(`读取详情失败:${(e as Error).message}`, "err");
+      const msg = (e as Error).message;
+      // 记录已被删除:静默关闭抽屉,不弹错
+      if (isMissingItemError(msg)) closeDrawer();
+      else toast(`读取详情失败:${msg}`, "err");
     } finally {
       setLoading(false);
     }
-  }, [drawer, toast]);
+  }, [drawer, toast, closeDrawer]);
 
   useEffect(() => {
     setEditing(false);
@@ -173,8 +177,15 @@ export function ItemDrawer() {
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--err)] hover:bg-[var(--err)]/10"
             onClick={async () => {
               if (!(await confirmDialog("确定删除这条记录吗?此操作不可恢复。"))) return;
-              await act(() => api.deleteItems([it.id]), "已删除");
-              closeDrawer();
+              try {
+                await api.deleteItems([it.id]);
+                // 先关闭抽屉再刷新,避免重新读取已删除的记录而弹出错误
+                itemsDeleted([it.id]);
+                toast("已删除", "ok");
+                void refreshStatus();
+              } catch (e) {
+                toast((e as Error).message, "err");
+              }
             }}
           >
             <TrashIcon size={13} />删除

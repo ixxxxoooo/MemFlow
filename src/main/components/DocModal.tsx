@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { editModeOf, renderAsMarkdown } from "../../lib/docKind";
 import { fmtDate, fmtTime } from "../../lib/format";
+import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
 import { CloseIcon, EditIcon, RefreshIcon, SparkleIcon, TrashIcon } from "./icons";
@@ -17,7 +18,7 @@ const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
 type Tab = "preview" | "chunks";
 
 export function DocModal() {
-  const { docModal, closeDocModal, toast, dataVersion, bumpData, refreshStatus } = useApp();
+  const { docModal, closeDocModal, itemsDeleted, toast, dataVersion, bumpData, refreshStatus } = useApp();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("preview");
@@ -37,11 +38,14 @@ export function DocModal() {
       setDetail(await api.getItem(docModal.itemId));
     } catch (e) {
       setDetail(null);
-      toast(`读取文档失败:${(e as Error).message}`, "err");
+      const msg = (e as Error).message;
+      // 记录已被删除(如后台事件触发的刷新):静默关闭,不弹错
+      if (isMissingItemError(msg)) closeDocModal();
+      else toast(`读取文档失败:${msg}`, "err");
     } finally {
       setLoading(false);
     }
-  }, [docModal, toast]);
+  }, [docModal, toast, closeDocModal]);
 
   // 打开另一篇文档时重置界面状态
   useEffect(() => {
@@ -151,8 +155,15 @@ export function DocModal() {
                     className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-[var(--err)] hover:bg-[var(--err)]/10"
                     onClick={async () => {
                       if (!(await confirmDialog("确定删除这个文档吗?此操作不可恢复。"))) return;
-                      await act(() => api.deleteItems([it.id]), "已删除");
-                      closeDocModal();
+                      try {
+                        await api.deleteItems([it.id]);
+                        // 先关闭弹窗再刷新,避免重新读取已删除的记录
+                        itemsDeleted([it.id]);
+                        toast("已删除", "ok");
+                        void refreshStatus();
+                      } catch (e) {
+                        toast((e as Error).message, "err");
+                      }
                     }}
                   >
                     <TrashIcon size={13} />删除

@@ -76,4 +76,9 @@ export const api = {
   hideCapsule: () => call<void>("hide_capsule"),
   resizeCapsule: (height: number) => call<void>("resize_capsule", { height }),
   notifyToast: (message: string) => call<void>("notify_toast", { message }),
+  /** 把前端错误写入后端日志文件 */
+  logFrontend: (level: "error" | "warn" | "info", message: string) =>
+    call<void>("log_frontend", { level, message }),
+  /** 打开日志目录,返回目录路径 */
+  openLogDir: () => call<string>("open_log_dir"),
 };

@@ -254,6 +254,7 @@ export function SettingsView() {
             <div className="rounded-2xl border border-[var(--line)] px-5">
               <Row label="数据位置" hint="单个 SQLite 文件 + 附件目录,拷走即可迁移。"><span className="selectable max-w-[260px] break-all text-xs text-[var(--fg-dim)]">{status.dataDir}</span></Row>
               <Row label="统计" hint={`向量索引已载入 ${status.vectorCount} 条`}><span className="text-xs text-[var(--fg-dim)]">{status.stats.notes} 记录 · {status.stats.images} 图片 · {status.stats.documents} 文档 · {status.stats.chunks} 切片</span></Row>
+              <Row label="运行日志" hint="按天滚动、保留 7 天;反馈问题时请附上最近的日志文件。"><button className="btn btn-secondary" onClick={() => void api.openLogDir().catch((e: Error) => toast(`打开失败:${e.message}`, "err"))}>打开日志目录</button></Row>
               <Row label="备份数据" hint="导出数据库一致性快照与全部附件到所选文件夹。"><button className="btn btn-secondary" onClick={() => void backup()}>选择位置并备份</button></Row>
               <Row label="全库重刷" hint="用当前模型与提示词重新解析所有内容,旧索引在新结果就绪后才会被替换。">
                 <button className="btn btn-secondary" onClick={async () => {

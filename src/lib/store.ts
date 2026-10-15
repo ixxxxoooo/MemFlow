@@ -36,6 +36,8 @@ interface AppState {
   closeDrawer: () => void;
   openDocModal: (itemId: number, chunkId?: number) => void;
   closeDocModal: () => void;
+  /** 条目被删除:关闭正在展示它们的抽屉/弹窗并刷新数据 */
+  itemsDeleted: (ids: number[]) => void;
   toast: (text: string, kind?: ToastItem["kind"]) => void;
   startPull: (name: string, direct: boolean) => Promise<void>;
 }
@@ -67,6 +69,13 @@ export const useApp = create<AppState>((set, get) => ({
   closeDrawer: () => set({ drawer: null }),
   openDocModal: (itemId, chunkId) => set({ docModal: { itemId, chunkId } }),
   closeDocModal: () => set({ docModal: null }),
+  itemsDeleted: (ids) =>
+    set((s) => ({
+      // 被删除的条目若正在抽屉/弹窗中展示,先关闭再刷新,避免重新读取已不存在的记录而弹错
+      drawer: s.drawer && ids.includes(s.drawer.itemId) ? null : s.drawer,
+      docModal: s.docModal && ids.includes(s.docModal.itemId) ? null : s.docModal,
+      dataVersion: s.dataVersion + 1,
+    })),
   toast: (text, kind = "info") => {
     const id = toastSeq++;
     set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }));
