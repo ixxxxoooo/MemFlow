@@ -169,6 +169,8 @@ pub struct RerankModelStatus {
     /// 总下载大小(字节)
     pub size: u64,
     pub installed: bool,
+    /// 当前构建是否包含本地重排序引擎(Intel Mac 版因 ONNX Runtime 无预编译库而不含)
+    pub engine: bool,
 }
 
 /// 列出所有内置模型及安装状态
@@ -180,6 +182,7 @@ pub fn list_status(root: &Path) -> Vec<RerankModelStatus> {
             label: s.label.into(),
             size: s.files.iter().map(|f| f.size).sum(),
             installed: is_installed(root, s.id),
+            engine: cfg!(feature = "rerank"),
         })
         .collect()
 }

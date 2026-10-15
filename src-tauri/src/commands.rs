@@ -819,7 +819,8 @@ pub fn hide_capsule(app: AppHandle) {
 /// 调整胶囊高度(显示附件预览时增高)
 #[tauri::command]
 pub fn resize_capsule(app: AppHandle, height: f64) {
-    windows::resize_capsule(&app, height.clamp(72.0, 420.0));
+    // 下限必须不大于输入框卡片的实际高度(约 62px),否则窗口会比内容高,下方露出一截透明区域/阴影
+    windows::resize_capsule(&app, height.clamp(40.0, 420.0));
 }
 
 /// 在屏幕右下角显示轻量提示

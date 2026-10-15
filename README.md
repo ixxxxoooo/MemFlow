@@ -61,6 +61,7 @@
 | --- | --- | --- | --- |
 | 问答、检索、笔记、文档导入(文本类格式)、AI 整理、云端模型 | ✅ | ✅ | ✅ |
 | 本机 OCR(扫描版 PDF、图中文字) | ✅ PDFKit + Vision | ❌ 可用「视觉模型」解析 PDF | ❌ 同左 |
+| 本地重排序(ONNX) | ✅ Apple Silicon;Intel 版不含(ONNX Runtime 无预编译库,回退融合排序) | ✅ | ✅(源码构建) |
 | 窗口毛玻璃效果 | ✅ | 实色窗口 | 实色窗口 |
 | API Key 存储 | 钥匙串 | 凭据管理器 | Secret Service(GNOME Keyring / KWallet) |
 | 全局快捷键默认值 | `Cmd+Shift+K` | `Ctrl+Shift+K` | `Ctrl+Shift+K` |

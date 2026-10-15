@@ -116,16 +116,20 @@ jobs:
             target: aarch64-apple-darwin
             bundles: dmg
             ext: dmg
+            cargo_args: ""
           - name: macOS (Intel)
             os: macos-latest
             target: x86_64-apple-darwin
             bundles: dmg
             ext: dmg
+            # ONNX Runtime 没有 x86_64 macOS 预编译库,Intel 版不含本地重排序(检索回退到 RRF 融合排序)
+            cargo_args: "-- --no-default-features"
           - name: Windows (x64)
             os: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: nsis
             ext: exe
+            cargo_args: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -163,7 +167,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseDraft: true
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.cargo_args }}
 
       - name: 构建 (手动触发,仅产出构建物)
         if: github.ref_type != 'tag'
@@ -171,7 +175,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.cargo_args }}
 
       - name: 手动触发时上传构建物
         if: github.ref_type != 'tag'

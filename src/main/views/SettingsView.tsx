@@ -12,7 +12,7 @@ import type { Settings } from "../../lib/types";
 import { ConnResult, type ConnState } from "../components/ConnResult";
 import { SecretInput } from "../components/SecretInput";
 import { APP_SHORTCUTS } from "../../lib/appShortcuts";
-import { shortcutLabel } from "../../lib/platform";
+import { isMac, shortcutLabel } from "../../lib/platform";
 import { ProfilesEditor } from "../components/ProfilesEditor";
 import { ModelSourceRows } from "../components/ModelSourceRows";
 import { inputCls, Row } from "../components/SettingsRow";
@@ -33,6 +33,8 @@ export function SettingsView() {
   const [conn, setConn] = useState<ConnState | null>(null);
   // 本地重排序模型清单;下载结束(pull 回到 null)后刷新安装状态
   const [rerankModels, setRerankModels] = useState<RerankModel[]>([]);
+  // 未取到模型列表前按"有引擎"处理,避免界面闪烁
+  const rerankEngine = rerankModels.length === 0 || rerankModels.every((m) => m.engine !== false);
   const pulling = useApp((s) => s.pull);
   useEffect(() => { if (!pulling) void api.rerankModels().then(setRerankModels).catch(() => {}); }, [pulling]);
 
@@ -230,16 +232,16 @@ export function SettingsView() {
               <Row label="模型常驻时长" hint="空闲多久后从内存卸载,如 5m、30s、1h、-1(常驻)。"><input className={`${inputCls} w-28`} value={form.keepAlive} onChange={(e) => set("keepAlive", e.target.value)} /></Row>
               <Row label="上下文长度" hint="所有请求保持一致,避免 Ollama 反复重载模型。内存紧张可调小。"><input type="number" className={`${inputCls} w-28`} value={form.numCtx} onChange={(e) => set("numCtx", Number(e.target.value))} /></Row>
               <Row label="入库并发数" hint="同时处理的文档数。0 为自动(按 CPU 核数,最多 4)。向量化与本地大模型调用仍按各自上限限流,调大不会撑爆内存。"><input type="number" min={0} max={8} className={`${inputCls} w-28`} value={form.importConcurrency} onChange={(e) => set("importConcurrency", Math.max(0, Math.min(8, Number(e.target.value) || 0)))} /></Row>
-              <Row label="PDF 解析模式" hint="自动:读取文本层,扫描页用本机 OCR,表格还原为 Markdown(快,推荐)。视觉模型:逐页交给视觉模型转 Markdown,版面/表格更准但很慢,需先下载视觉模型。">
+              <Row label="PDF 解析模式" hint={(isMac ? "自动:读取文本层,扫描页用本机 OCR,表格还原为 Markdown(快,推荐)。" : "自动:只读取文本层(本平台没有本机 OCR,扫描版 PDF 请选视觉模型)。") + "视觉模型:逐页交给视觉模型转 Markdown,版面/表格更准但很慢,需先配置视觉模型。"}>
                 <select className={`${inputCls} w-40`} value={form.pdfParseMode} onChange={(e) => set("pdfParseMode", e.target.value as "auto" | "vision")}>
-                  <option value="auto">自动(本机 OCR)</option>
+                  <option value="auto">{isMac ? "自动(本机 OCR)" : "自动(仅文本层)"}</option>
                   <option value="vision">视觉模型(高精度)</option>
                 </select>
               </Row>
-              <Row label="本地重排序" hint="对检索召回的候选片段用本地模型再次精排,显著提升答案相关性;只在检索时多花约 1 秒。模型未下载时自动跳过。">
-                <input type="checkbox" className="switch" checked={form.rerankEnabled} onChange={(e) => set("rerankEnabled", e.target.checked)} />
+              <Row label="本地重排序" hint={rerankEngine ? "对检索召回的候选片段用本地模型再次精排,显著提升答案相关性;只在检索时多花约 1 秒。模型未下载时自动跳过。" : "当前安装包不含本地重排序引擎(Intel Mac 版的 ONNX Runtime 没有预编译库),检索使用向量 + 全文融合排序。"}>
+                <input type="checkbox" className="switch" disabled={!rerankEngine} checked={rerankEngine && form.rerankEnabled} onChange={(e) => set("rerankEnabled", e.target.checked)} />
               </Row>
-              {form.rerankEnabled && (
+              {rerankEngine && form.rerankEnabled && (
                 <>
                   <Row label="重排序模型" hint="base 体积小速度快(推荐);v2-m3 多语言更准但更慢更大。">
                     <select className={`${inputCls} w-72`} value={form.rerankModel} onChange={(e) => set("rerankModel", e.target.value)}>

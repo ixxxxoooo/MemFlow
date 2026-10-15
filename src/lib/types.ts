@@ -256,6 +256,8 @@ export interface RerankModel {
   /** 总下载大小(字节) */
   size: number;
   installed: boolean;
+  /** 当前构建是否包含本地重排序引擎 */
+  engine: boolean;
 }
 
 export interface Stats {
