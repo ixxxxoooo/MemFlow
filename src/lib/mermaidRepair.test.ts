@@ -1,6 +1,6 @@
 // @author ygw
 import { describe, expect, it, vi } from "vitest";
-import { normalizeMermaid, renderWithRepair } from "./mermaidRepair";
+import { normalizeMermaid, renderWithRepair, withTimeout } from "./mermaidRepair";
 
 describe("normalizeMermaid", () => {
   it("去掉围栏与语言标记", () => {
@@ -43,5 +43,18 @@ describe("renderWithRepair", () => {
     const r = await renderWithRepair("x", async () => { throw new Error("e1"); }, async () => { throw new Error("模型不可用"); });
     expect(r.ok).toBe(false);
     expect(r.error).toContain("模型不可用");
+  });
+});
+
+describe("withTimeout", () => {
+  it("超时后拒绝,正常完成则透传", async () => {
+    vi.useFakeTimers();
+    const never = new Promise<string>(() => undefined);
+    const p = withTimeout(never, 1000, "超时");
+    const assertion = expect(p).rejects.toThrow("超时");
+    await vi.advanceTimersByTimeAsync(1001);
+    await assertion;
+    vi.useRealTimers();
+    await expect(withTimeout(Promise.resolve(7), 1000, "超时")).resolves.toBe(7);
   });
 });

@@ -55,3 +55,18 @@ export async function renderWithRepair(
   }
   return { ok: false, code: current, error: lastError, repairs: maxRepairs };
 }
+
+/**
+ * 给异步任务加超时;超时则以错误拒绝(原任务仍会跑完,但结果被丢弃)
+ *
+ * 参数: p 任务;ms 毫秒;message 超时提示
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}

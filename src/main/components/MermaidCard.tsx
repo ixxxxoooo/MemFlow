@@ -3,10 +3,12 @@
 
 import { save } from "@tauri-apps/plugin-dialog";
 import mermaid from "mermaid";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../lib/api";
 import { toBase64 } from "../../lib/format";
-import { renderWithRepair } from "../../lib/mermaidRepair";
+import { renderWithRepair, withTimeout, type RepairOutcome } from "../../lib/mermaidRepair";
+import { popOverlay, pushOverlay } from "../../lib/overlay";
 import { useApp } from "../../lib/store";
 import { CloseIcon, CodeIcon, CopyIcon, DownloadIcon, ZoomIcon } from "./icons";
 import { PanZoom } from "./PanZoom";
@@ -74,11 +76,18 @@ async function svgToPngBase64(svg: string): Promise<string> {
 
 interface Props {
   code: string;
-  /** 正在流式生成中:先不渲染,仅展示占位 */
+  /** 本代码块的围栏尚未闭合(仍在流式写入):只显示占位,不渲染 */
   live?: boolean;
+  /** 整条回答仍在流式输出:代码块已写完时先尝试本地渲染,但不调用 AI 修复、不展示错误 */
+  deferRepair?: boolean;
 }
 
-export function MermaidCard({ code, live }: Props) {
+/** 渲染 + 自动修复整体超时(毫秒) */
+const RUN_TIMEOUT_MS = 60_000;
+/** 代码变化后的防抖(毫秒) */
+const DEBOUNCE_MS = 300;
+
+export function MermaidCard({ code, live, deferRepair }: Props) {
   const uid = useId().replace(/:/g, "");
   const toast = useApp((s) => s.toast);
   const [svg, setSvg] = useState<string>("");
@@ -88,34 +97,69 @@ export function MermaidCard({ code, live }: Props) {
   const [repairs, setRepairs] = useState(0);
   const [showCode, setShowCode] = useState(false);
   const [zoom, setZoom] = useState(false);
+  // 渲染代次:只采用最新一次的结果,过期结果直接丢弃
+  const gen = useRef(0);
+  // 最近一次渲染对应的输入代码与是否成功,用于避免重复渲染
+  const done = useRef<{ code: string; ok: boolean } | null>(null);
 
-  /** 渲染并按需自动修复 */
-  const run = async (src: string) => {
+  /**
+   * 渲染并按需自动修复
+   * maxRepairs 为 0 时只做本地渲染;silent 为 true 时失败不展示错误(等回答结束再正式处理)
+   */
+  const run = useCallback(async (src: string, maxRepairs: number, silent: boolean) => {
+    const my = ++gen.current;
     setBusy(true);
     setError("");
     let n = 0;
-    const out = await renderWithRepair(
-      src,
-      (c) => renderSvg(`mf-${uid}-${n++}`, c),
-      (c, e) => api.fixMermaid(c, e),
-      2,
-    );
+    const out: RepairOutcome = await withTimeout(
+      renderWithRepair(
+        src,
+        (c) => renderSvg(`mf-${uid}-${my}-${n++}`, c),
+        (c, e) => api.fixMermaid(c, e),
+        maxRepairs,
+      ),
+      RUN_TIMEOUT_MS,
+      "渲染或自动修复超时(60 秒),可点「再试一次」",
+    ).catch((e: Error) => ({ ok: false, code: src, error: e.message, repairs: 0 }));
+    if (my !== gen.current) return;
     setBusy(false);
+    done.current = { code: src, ok: out.ok };
+    if (out.ok && out.svg) {
+      setFinalCode(out.code);
+      setRepairs(out.repairs);
+      setSvg(out.svg);
+      return;
+    }
+    setSvg("");
+    if (silent) return;
     setFinalCode(out.code);
     setRepairs(out.repairs);
-    if (out.ok && out.svg) setSvg(out.svg);
-    else {
-      setSvg("");
-      setError(out.error ?? "渲染失败");
-      setShowCode(true);
-    }
-  };
+    setError(out.error ?? "渲染失败");
+    setShowCode(true);
+  }, [uid]);
 
   useEffect(() => {
     if (live) return;
-    void run(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, live]);
+    // 同一份代码已渲染成功:不重复渲染
+    if (done.current?.code === code && done.current.ok) return;
+    const t = setTimeout(() => void run(code, deferRepair ? 0 : 2, !!deferRepair), DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [code, live, deferRepair, run]);
+
+  // 卸载后让在途渲染结果作废
+  useEffect(() => () => { gen.current += 1; }, []);
+
+  // 放大层打开期间:登记浮层(暂停聊天贴底)并支持 Esc 关闭
+  useEffect(() => {
+    if (!zoom) return;
+    pushOverlay();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(false);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      popOverlay();
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [zoom]);
 
   const exportAs = async (kind: "svg" | "png") => {
     try {
@@ -160,6 +204,8 @@ export function MermaidCard({ code, live }: Props) {
             <span className="spin mr-2 inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent" />
             图表生成中…
           </div>
+        ) : deferRepair && !busy && !svg ? (
+          <div className="flex h-24 items-center justify-center text-sm text-[var(--fg-dim)]">回答完成后渲染图表…</div>
         ) : busy ? (
           <div className="flex h-24 items-center justify-center text-sm text-[var(--fg-dim)]">
             <span className="spin mr-2 inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent" />
@@ -171,7 +217,7 @@ export function MermaidCard({ code, live }: Props) {
           <div className="rounded-lg bg-[var(--bg-soft)] p-3 text-xs text-[var(--err)]">
             图表语法有误,自动修复未成功:{error}
             <div className="mt-2">
-              <button className="rounded-md bg-[var(--accent-soft)] px-2 py-1 text-[var(--accent)]" onClick={() => void run(finalCode)}>再试一次</button>
+              <button className="rounded-md bg-[var(--accent-soft)] px-2 py-1 text-[var(--accent)]" onClick={() => void run(finalCode, 2, false)}>再试一次</button>
             </div>
           </div>
         ) : null}
@@ -179,16 +225,22 @@ export function MermaidCard({ code, live }: Props) {
           <pre className="selectable mt-3 max-h-60 overflow-auto rounded-lg bg-[var(--bg-soft)] p-3 text-xs"><code>{finalCode}</code></pre>
         )}
       </div>
-      {zoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-8" onClick={() => setZoom(false)}>
-          <div className="relative h-full w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--bg)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button className="absolute right-3 top-3 z-10 rounded-full bg-[var(--bg-soft)] p-1.5" onClick={() => setZoom(false)}><CloseIcon size={14} /></button>
-            <PanZoom className="h-full w-full">
-              <div dangerouslySetInnerHTML={{ __html: svg }} />
-            </PanZoom>
-          </div>
-        </div>
-      )}
+      {zoom &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-8"
+            style={{ overscrollBehavior: "contain" }}
+            onClick={() => setZoom(false)}
+          >
+            <div className="relative h-full w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--bg)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <button className="absolute right-3 top-3 z-10 rounded-full bg-[var(--bg-soft)] p-1.5" onClick={() => setZoom(false)}><CloseIcon size={14} /></button>
+              <PanZoom className="h-full w-full">
+                <div dangerouslySetInnerHTML={{ __html: svg }} />
+              </PanZoom>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

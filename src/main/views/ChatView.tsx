@@ -1,7 +1,8 @@
 // @author ygw
 // AI 问答视图:对话流 + 流式输出 + 来源角标 + 历史会话
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { overlayOpen } from "../../lib/overlay";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { fmtDate, fmtDuration } from "../../lib/format";
@@ -34,8 +35,10 @@ export function ChatView() {
   useEffect(() => { void api.warmChat(useChat.getState().modelRef).catch(() => undefined); }, []);
 
   // 流式输出时自动贴底;用户上滑查看历史时不打扰
+  // 直接设置 scrollTop(而非 scrollIntoView,后者会连带滚动祖先);放大层打开时暂停
   useEffect(() => {
-    if (stick.current) endRef.current?.scrollIntoView({ block: "end" });
+    const el = scroller.current;
+    if (el && stick.current && !overlayOpen()) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const submit = async () => {
@@ -47,7 +50,10 @@ export function ChatView() {
     await send(q);
   };
 
-  const onCite = (s: Source) => (s.kind === "document" ? openDocModal(s.itemId, s.chunkId) : openDrawer(s.itemId, s.chunkId));
+  const onCite = useCallback(
+    (s: Source) => (s.kind === "document" ? openDocModal(s.itemId, s.chunkId) : openDrawer(s.itemId, s.chunkId)),
+    [openDocModal, openDrawer],
+  );
   const empty = messages.length === 0;
 
   return (

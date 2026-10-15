@@ -1,14 +1,18 @@
 // @author ygw
 // 可缩放、可拖拽的容器(用于放大查看流程图)
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { wheelIntent } from "../../lib/panzoom";
 
 interface Props {
   children: ReactNode;
   className?: string;
 }
 
-/** 滚轮缩放(以指针为中心)+ 按住拖拽平移 + 双击复位 */
+const MIN_K = 0.2;
+const MAX_K = 8;
+
+/** 普通滚轮平移 + ⌘/Ctrl 滚轮(触控板捏合)缩放 + 按住拖拽 + 双击复位 */
 export function PanZoom({ children, className = "" }: Props) {
   const [t, setT] = useState({ x: 0, y: 0, k: 1 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
@@ -16,7 +20,7 @@ export function PanZoom({ children, className = "" }: Props) {
 
   const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
     setT((p) => {
-      const k = Math.min(8, Math.max(0.2, p.k * factor));
+      const k = Math.min(MAX_K, Math.max(MIN_K, p.k * factor));
       const r = box.current?.getBoundingClientRect();
       const px = (cx ?? (r ? r.left + r.width / 2 : 0)) - (r?.left ?? 0);
       const py = (cy ?? (r ? r.top + r.height / 2 : 0)) - (r?.top ?? 0);
@@ -25,15 +29,25 @@ export function PanZoom({ children, className = "" }: Props) {
     });
   }, []);
 
+  // 滚轮必须以 passive:false 注册,preventDefault 才能阻止背后页面一起滚动
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const intent = wheelIntent(e);
+      if (intent.type === "zoom") zoomBy(intent.factor, e.clientX, e.clientY);
+      else setT((p) => ({ ...p, x: p.x + intent.dx, y: p.y + intent.dy }));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomBy]);
+
   return (
-    <div className={`relative overflow-hidden ${className}`}>
+    <div className={`relative overflow-hidden ${className}`} style={{ overscrollBehavior: "contain" }}>
       <div
         ref={box}
-        className="h-full w-full cursor-grab active:cursor-grabbing"
-        onWheel={(e) => {
-          e.preventDefault();
-          zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY);
-        }}
+        className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
         onPointerDown={(e) => {
           (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
           drag.current = { x: e.clientX, y: e.clientY, ox: t.x, oy: t.y };
@@ -53,6 +67,7 @@ export function PanZoom({ children, className = "" }: Props) {
         </div>
       </div>
       <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)] p-1 text-sm shadow">
+        <span className="px-1.5 text-[10px] text-[var(--fg-dim)]">滚轮平移 · ⌘/Ctrl+滚轮缩放</span>
         <button className="h-7 w-7 rounded hover:bg-[var(--bg-soft)]" onClick={() => zoomBy(1 / 1.25)}>−</button>
         <span className="w-11 text-center text-xs text-[var(--fg-dim)]">{Math.round(t.k * 100)}%</span>
         <button className="h-7 w-7 rounded hover:bg-[var(--bg-soft)]" onClick={() => zoomBy(1.25)}>+</button>
