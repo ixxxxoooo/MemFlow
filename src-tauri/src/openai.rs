@@ -1,8 +1,8 @@
 // @author ygw
 //! OpenAI 兼容协议客户端(DeepSeek、通义、Kimi、智谱、硅基流动、OpenAI 等)。
 //!
-//! 只负责文本对话,不提供向量化与视觉:
-//! - DeepSeek 官方没有 embedding 接口,向量模型始终使用本地 Ollama
+//! 覆盖三类调用:文本对话、向量化(`/embeddings`)、视觉(多模态消息,图片以 data URL 传入):
+//! - DeepSeek 官方没有 embedding 接口,需要云端向量时请选择支持的服务(通义、硅基流动、OpenAI 等)
 //! - 结构化输出统一使用 `response_format: json_object`,并把 JSON Schema 写进提示词
 //!   (DeepSeek 不支持 `json_schema` 模式)
 //! - 流式使用 SSE(`data: {...}` 逐行,以 `data: [DONE]` 结束)
@@ -10,6 +10,7 @@
 
 use crate::error::{AppError, Result};
 use crate::ollama::{ChatMessage, GenOptions};
+use crate::vector;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -150,7 +151,7 @@ impl OpenAiClient {
         };
         let mut body = json!({
             "model": model,
-            "messages": msgs,
+            "messages": to_openai_messages(&msgs),
             "stream": stream,
             "temperature": opts.temperature,
         });
@@ -160,8 +161,19 @@ impl OpenAiClient {
         body
     }
 
-    /// 发送请求并统一映射 HTTP 错误
+    /// 发送对话请求并统一映射 HTTP 错误
     async fn send(&self, body: &Value, timeout: Option<Duration>) -> Result<reqwest::Response> {
+        let url = self.endpoint();
+        self.send_to(&url, body, timeout).await
+    }
+
+    /// 向指定地址发送请求并统一映射 HTTP 错误
+    async fn send_to(
+        &self,
+        url: &str,
+        body: &Value,
+        timeout: Option<Duration>,
+    ) -> Result<reqwest::Response> {
         if self.api_key.is_empty() {
             return Err(AppError::LlmUnavailable(
                 self.missing_key_reason
@@ -169,11 +181,7 @@ impl OpenAiClient {
                     .unwrap_or_else(|| "尚未配置 API Key,请在设置中填写".into()),
             ));
         }
-        let mut req = self
-            .http
-            .post(self.endpoint())
-            .bearer_auth(&self.api_key)
-            .json(body);
+        let mut req = self.http.post(url).bearer_auth(&self.api_key).json(body);
         if let Some(t) = timeout {
             req = req.timeout(t);
         }
@@ -276,6 +284,31 @@ impl OpenAiClient {
         Ok(full)
     }
 
+    /// 向量化接口完整地址
+    pub fn embeddings_endpoint(&self) -> String {
+        format!("{}/embeddings", self.base)
+    }
+
+    /// 批量向量化,结果已做 L2 归一化并校验合法性
+    ///
+    /// 参数: model 向量模型;inputs 文本列表
+    /// 返回: 与输入等长的向量列表(按返回的 index 对齐)。
+    /// 为兼容各家对单次条数的限制(如通义最多 10 条),按 [`EMBED_MAX_INPUTS`] 分批串行请求
+    pub async fn embed(&self, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
+        let mut out = Vec::with_capacity(inputs.len());
+        for part in inputs.chunks(EMBED_MAX_INPUTS) {
+            let body = json!({ "model": model, "input": part, "encoding_format": "float" });
+            let url = self.embeddings_endpoint();
+            let resp = self.send_to(&url, &body, Some(CHAT_TIMEOUT)).await?;
+            let v: Value = resp
+                .json()
+                .await
+                .map_err(|e| AppError::Llm(format!("向量响应不是合法 JSON: {e}")))?;
+            out.extend(parse_embeddings(&v, part.len())?);
+        }
+        Ok(out)
+    }
+
     /// 连通性测试:发送一个极小请求,验证地址、Key 与模型名
     ///
     /// 参数: model 模型名
@@ -290,6 +323,115 @@ impl OpenAiClient {
         self.send(&body, Some(Duration::from_secs(30))).await?;
         Ok(format!("连接成功,模型 {model} 可用"))
     }
+
+    /// 向量模型连通性测试:对一句话做向量化并返回维度
+    ///
+    /// 参数: model 向量模型名
+    pub async fn ping_embed(&self, model: &str) -> Result<String> {
+        let v = self.embed(model, &["连接测试".to_string()]).await?;
+        let dim = v.first().map(|x| x.len()).unwrap_or(0);
+        Ok(format!("连接成功,向量模型 {model} 可用(维度 {dim})"))
+    }
+
+    /// 视觉模型连通性测试:发送一张 1×1 的小图,验证模型接受图片输入
+    ///
+    /// 参数: model 视觉模型名
+    pub async fn ping_vision(&self, model: &str) -> Result<String> {
+        let mut m = ChatMessage::new("user", "这是一张测试图片,回复 ok 即可。");
+        m.images = Some(vec![TINY_PNG_B64.to_string()]);
+        let body = json!({
+            "model": model,
+            "messages": to_openai_messages(&[m]),
+            "max_tokens": 8,
+            "stream": false,
+        });
+        self.send(&body, Some(Duration::from_secs(60))).await?;
+        Ok(format!("连接成功,视觉模型 {model} 可用"))
+    }
+}
+
+/// 云端向量接口单次请求的最大条数(取各家限制的较小值)
+pub const EMBED_MAX_INPUTS: usize = 10;
+
+/// 1×1 透明 PNG(视觉连通性测试用)
+const TINY_PNG_B64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/// 按 base64 开头的魔数判断图片类型
+///
+/// 参数: b64 图片的 base64 文本
+/// 返回: MIME 类型,无法识别时按 jpeg 处理
+pub fn image_mime(b64: &str) -> &'static str {
+    if b64.starts_with("iVBOR") {
+        "image/png"
+    } else if b64.starts_with("R0lG") {
+        "image/gif"
+    } else if b64.starts_with("UklG") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    }
+}
+
+/// 把内部消息转成 OpenAI 格式:带图片的消息改写为 `content` 数组(文本 + data URL 图片)
+///
+/// 参数: msgs 内部消息(图片为纯 base64)
+/// 返回: 可直接作为请求体 `messages` 的 JSON 数组
+pub fn to_openai_messages(msgs: &[ChatMessage]) -> Vec<Value> {
+    msgs.iter()
+        .map(|m| match m.images.as_ref().filter(|i| !i.is_empty()) {
+            None => json!({ "role": m.role, "content": m.content }),
+            Some(imgs) => {
+                let mut parts = vec![json!({ "type": "text", "text": m.content })];
+                for b in imgs {
+                    parts.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:{};base64,{}", image_mime(b), b) },
+                    }));
+                }
+                json!({ "role": m.role, "content": parts })
+            }
+        })
+        .collect()
+}
+
+/// 解析 `/embeddings` 响应
+///
+/// 参数: v 响应 JSON;expect 期望条数
+/// 返回: 按 `index` 排好序、已归一化的向量;条数不符或向量非法时报错
+pub fn parse_embeddings(v: &Value, expect: usize) -> Result<Vec<Vec<f32>>> {
+    let data = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| AppError::Llm("向量响应缺少 data".into()))?;
+    if data.len() != expect {
+        return Err(AppError::Llm(format!(
+            "向量接口返回 {} 条,期望 {expect} 条",
+            data.len()
+        )));
+    }
+    let mut rows: Vec<(usize, Vec<f32>)> = Vec::with_capacity(data.len());
+    for (i, item) in data.iter().enumerate() {
+        let idx = item
+            .get("index")
+            .and_then(|x| x.as_u64())
+            .map(|x| x as usize)
+            .unwrap_or(i);
+        let mut vec: Vec<f32> = item
+            .get("embedding")
+            .and_then(|e| e.as_array())
+            .ok_or_else(|| AppError::Llm("向量响应缺少 embedding".into()))?
+            .iter()
+            .map(|x| x.as_f64().unwrap_or(f64::NAN) as f32)
+            .collect();
+        if !vector::is_valid(&vec) {
+            return Err(AppError::Llm("向量接口返回了非法向量".into()));
+        }
+        vector::normalize(&mut vec);
+        rows.push((idx, vec));
+    }
+    rows.sort_by_key(|(i, _)| *i);
+    Ok(rows.into_iter().map(|(_, v)| v).collect())
 }
 
 /// 把 HTTP 状态码映射成带中文说明的错误
@@ -359,6 +501,56 @@ mod tests {
         let m = inject_schema(&[ChatMessage::new("user", "hi")], &schema);
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].role, "system");
+    }
+
+    #[test]
+    fn 带图消息改写为多模态数组() {
+        let mut m = ChatMessage::new("user", "看图");
+        m.images = Some(vec!["iVBORabc".into(), "/9j/xyz".into()]);
+        let out = to_openai_messages(&[ChatMessage::new("system", "你是助手"), m]);
+        assert_eq!(out[0]["content"], "你是助手");
+        let parts = out[1]["content"].as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(
+            parts[1]["image_url"]["url"],
+            "data:image/png;base64,iVBORabc"
+        );
+        assert_eq!(
+            parts[2]["image_url"]["url"],
+            "data:image/jpeg;base64,/9j/xyz"
+        );
+        // 纯文本消息不含 images 字段
+        assert!(out[0].get("images").is_none());
+        assert_eq!(image_mime("R0lGxx"), "image/gif");
+        assert_eq!(image_mime("UklGxx"), "image/webp");
+    }
+
+    #[test]
+    fn 解析向量响应并按index排序归一化() {
+        let v = json!({"data":[
+            {"index":1,"embedding":[0.0,2.0]},
+            {"index":0,"embedding":[3.0,4.0]},
+        ]});
+        let r = parse_embeddings(&v, 2).unwrap();
+        assert!((r[0][0] - 0.6).abs() < 1e-6 && (r[0][1] - 0.8).abs() < 1e-6);
+        assert!((r[1][1] - 1.0).abs() < 1e-6);
+        // 条数不符 / 缺字段 / 非法向量
+        assert!(parse_embeddings(&v, 3).is_err());
+        assert!(parse_embeddings(&json!({}), 1).is_err());
+        assert!(parse_embeddings(&json!({"data":[{"embedding":[]}]}), 1).is_err());
+    }
+
+    #[test]
+    fn 向量接口地址() {
+        let c = OpenAiClient::new(
+            reqwest::Client::new(),
+            "https://api.siliconflow.cn/v1/",
+            "k",
+        );
+        assert_eq!(
+            c.embeddings_endpoint(),
+            "https://api.siliconflow.cn/v1/embeddings"
+        );
     }
 
     #[test]

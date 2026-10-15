@@ -137,9 +137,12 @@ fn truncate_marked(s: String, max: usize) -> String {
     }
 }
 
-/// 视觉模式前置检查:视觉模型必须已安装
+/// 视觉模式前置检查:本地视觉模型必须已安装;云端视觉模型无需安装
 async fn ensure_vision_model(core: &Core) -> Result<()> {
     let s = core.settings();
+    if s.uses_cloud_vision() {
+        return Ok(());
+    }
     let installed: Vec<String> = core
         .ollama()
         .list_models()
@@ -215,15 +218,19 @@ async fn vision_page(core: &Core, doc: &Arc<Mutex<PdfDoc>>, idx: usize) -> Resul
     .ok_or_else(|| AppError::Parse("页面渲染失败".into()))?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(png);
-    let s = core.settings();
-    // 视觉模型与本地文本模型共用串行许可,避免同时占用内存
-    let _llm = permit(&core.stages.llm_local).await?;
-    core.prepare_chat_model(&s.vision_model).await;
+    let (client, model) = core.vision_backend()?;
+    // 本地视觉模型与本地文本模型共用串行许可,避免同时占用内存;云端只受云端并发上限约束
+    let _llm = if client.is_cloud() {
+        permit(&core.stages.llm_cloud).await?
+    } else {
+        let p = permit(&core.stages.llm_local).await?;
+        core.prepare_chat_model(&model).await;
+        p
+    };
     let msgs = prompts::pdf_page_messages(b64);
     let text = tokio::time::timeout(
         VISION_PAGE_TIMEOUT,
-        core.ollama()
-            .chat(&s.vision_model, &msgs, &core.gen_opts(0.0), None),
+        client.chat(&model, &msgs, &core.gen_opts(0.0), None),
     )
     .await
     .map_err(|_| AppError::Parse("视觉模型解析超时".into()))??;

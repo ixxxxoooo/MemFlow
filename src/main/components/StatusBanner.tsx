@@ -1,6 +1,7 @@
 // @author ygw
 // 顶部引导条:Ollama 未运行 / 缺少模型 / 云端密钥未配置 / 向量模型更换需重刷
 
+import { needsOllama } from "../../lib/modelSource";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import { loadDismissed, saveDismissed } from "../../lib/dismissed";
@@ -57,7 +58,7 @@ export function StatusBanner() {
   const bar = "flex items-center gap-3 border-b border-[var(--line)] px-5 py-2.5 text-[13px]";
   const primary = "btn btn-primary btn-sm";
 
-  if (!status.ollamaRunning && !dismissed.has("ollama-down")) {
+  if (!status.ollamaRunning && needsOllama(status.models) && !dismissed.has("ollama-down")) {
     return (
       <Bar className={`${bar} bg-[color-mix(in_srgb,var(--err)_10%,transparent)]`} onClose={close("ollama-down")}>
         <span>未检测到 Ollama 服务(向量化需要它)。新记录会先安全保存,等 Ollama 启动后自动解析。</span>

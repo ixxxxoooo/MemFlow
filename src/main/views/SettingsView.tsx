@@ -2,7 +2,7 @@
 // 设置页:模型、检索、快捷键、数据与备份
 
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { findPreset, LLM_PRESETS } from "../../lib/llmPresets";
@@ -13,23 +13,12 @@ import { ConnResult, type ConnState } from "../components/ConnResult";
 import { SecretInput } from "../components/SecretInput";
 import { APP_SHORTCUTS } from "../../lib/appShortcuts";
 import { ProfilesEditor } from "../components/ProfilesEditor";
+import { ModelSourceRows } from "../components/ModelSourceRows";
+import { inputCls, Row } from "../components/SettingsRow";
+import { embedIdentity } from "../../lib/modelSource";
 import { PullControls } from "../components/PullControls";
 import { RerankControls } from "../components/RerankControls";
 import type { RerankModel } from "../../lib/types";
-
-function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-6 border-b border-[var(--line)] py-3.5 last:border-0">
-      <div className="max-w-[300px]">
-        <div className="text-[13.5px] font-medium">{label}</div>
-        {hint && <div className="mt-0.5 text-xs leading-snug text-[var(--fg-dim)]">{hint}</div>}
-      </div>
-      <div className="flex shrink-0 items-center">{children}</div>
-    </div>
-  );
-}
-
-const inputCls = "w-60 rounded-lg border border-[var(--line)] bg-[var(--bg-soft)] px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--accent)]";
 
 export function SettingsView() {
   const { status, refreshStatus, toast, bumpData } = useApp();
@@ -54,7 +43,7 @@ export function SettingsView() {
   const settingsDirty = JSON.stringify(form) !== JSON.stringify(status.settings);
   const cloud = form.llmProvider === "openai_compat";
   const preset = findPreset(form.llmPreset);
-  const embedChanged = form.embedModel !== status.settings.embedModel;
+  const embedChanged = embedIdentity(form) !== embedIdentity(status.settings);
 
   const save = async () => {
     setSaving(true);
@@ -216,17 +205,27 @@ export function SettingsView() {
           </section>
 
           <section>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">本地模型(Ollama)</h3>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">向量与视觉模型(本地或云端)</h3>
             <div className="rounded-2xl border border-[var(--line)] px-5">
-              <Row label="服务地址" hint="本机 Ollama 的 REST 地址。向量化与图片解析始终在本机完成。"><input className={inputCls} value={form.ollamaUrl} onChange={(e) => set("ollamaUrl", e.target.value)} /></Row>
-              <Row label="向量模型" hint={embedChanged ? "更换后旧向量不再参与检索,需全库重刷。" : "负责把文字转为向量,如 bge-m3、nomic-embed-text。"}><input className={inputCls} value={form.embedModel} onChange={(e) => set("embedModel", e.target.value)} /></Row>
+              <ModelSourceRows kind="embed" form={form} set={set} keyedProfiles={status.keyedProfiles} pendingDefaultKey={keyInput}>
+                <Row label="向量模型" hint={embedChanged ? "更换后旧向量不再参与检索,需全库重刷。" : "负责把文字转为向量,如 bge-m3、nomic-embed-text。"}><input className={inputCls} value={form.embedModel} onChange={(e) => set("embedModel", e.target.value)} /></Row>
+              </ModelSourceRows>
               <Row label="启用视觉解析" hint="图片自动 OCR + 描述 + 标签。需要先下载视觉模型,开启后可对旧图片重刷补齐。">
                 <input type="checkbox" className="switch" checked={form.visionEnabled} onChange={(e) => set("visionEnabled", e.target.checked)} />
               </Row>
+              <ModelSourceRows kind="vision" form={form} set={set} keyedProfiles={status.keyedProfiles} pendingDefaultKey={keyInput}>
+                <Row label="视觉模型" hint="推荐 minicpm-v(中文 OCR 强)或 qwen2.5vl。"><input className={inputCls} value={form.visionModel} onChange={(e) => set("visionModel", e.target.value)} /></Row>
+              </ModelSourceRows>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">本地模型(Ollama)</h3>
+            <div className="rounded-2xl border border-[var(--line)] px-5">
+              <Row label="服务地址" hint="本机 Ollama 的 REST 地址。选择本地来源的模型会在这里运行。"><input className={inputCls} value={form.ollamaUrl} onChange={(e) => set("ollamaUrl", e.target.value)} /></Row>
               <Row label="导入文档时自动 AI 解读" hint="默认关闭:文档导入只做分块与向量索引,速度快,检索不受影响。开启后会额外调用文本模型生成摘要/标签(较慢);也可在文档弹窗里按需单独解读。">
                 <input type="checkbox" className="switch" checked={form.docAiEnrich} onChange={(e) => set("docAiEnrich", e.target.checked)} />
               </Row>
-              <Row label="视觉模型" hint="推荐 minicpm-v(中文 OCR 强)或 qwen2.5vl。"><input className={inputCls} value={form.visionModel} onChange={(e) => set("visionModel", e.target.value)} /></Row>
               <Row label="模型常驻时长" hint="空闲多久后从内存卸载,如 5m、30s、1h、-1(常驻)。"><input className={`${inputCls} w-28`} value={form.keepAlive} onChange={(e) => set("keepAlive", e.target.value)} /></Row>
               <Row label="上下文长度" hint="所有请求保持一致,避免 Ollama 反复重载模型。内存紧张可调小。"><input type="number" className={`${inputCls} w-28`} value={form.numCtx} onChange={(e) => set("numCtx", Number(e.target.value))} /></Row>
               <Row label="入库并发数" hint="同时处理的文档数。0 为自动(按 CPU 核数,最多 4)。向量化与本地大模型调用仍按各自上限限流,调大不会撑爆内存。"><input type="number" min={0} max={8} className={`${inputCls} w-28`} value={form.importConcurrency} onChange={(e) => set("importConcurrency", Math.max(0, Math.min(8, Number(e.target.value) || 0)))} /></Row>

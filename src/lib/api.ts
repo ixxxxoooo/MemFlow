@@ -48,6 +48,9 @@ export const api = {
   /** 测试云端连接;key 为空时使用已保存的密钥 */
   testLlmConnection: (baseUrl: string, model: string, key: string | null, profileId: string | null = null) =>
     call<string>("test_llm_connection", { baseUrl, model, key, profileId }),
+  /** 测试云端向量/视觉模型;profileId 为空表示默认云端配置,key 为空时使用已保存的密钥 */
+  testCloudModel: (kind: "embed" | "vision", profileId: string | null, model: string, key: string | null) =>
+    call<string>("test_cloud_model", { kind, profileId, model, key }),
   /** 对话可选的模型(本地已安装 + 已配置密钥的云端) */
   /** 预热向量模型与所选本地模型,减少首次提问等待 */
   warmChat: (modelRef: string | null) => call<void>("warm_chat", { modelRef }),

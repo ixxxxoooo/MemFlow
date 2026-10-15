@@ -191,6 +191,8 @@ async fn extract_meta(
 }
 
 /// 视觉解析(带重试)
+///
+/// 本地视觉模型与本地文本模型共用串行许可并做内存调度;云端视觉模型走云端并发许可,不需要本地模型。
 async fn run_vision(
     core: &Core,
     ollama: &OllamaClient,
@@ -199,16 +201,24 @@ async fn run_vision(
     token: &CancelToken,
 ) -> Result<Option<VisionResult>> {
     let s = core.settings();
-    // 视觉模型始终在本地运行,与本地文本模型共用串行许可,避免同时占用内存
-    let _permit = permit(&core.stages.llm_local).await?;
-    let installed: Vec<String> = ollama
-        .list_models()
-        .await?
-        .into_iter()
-        .map(|m| m.name)
-        .collect();
-    if !model_installed(&installed, &s.vision_model) {
-        return Err(AppError::ModelMissing(s.vision_model.clone()));
+    let (client, model) = core.vision_backend()?;
+    let cloud = client.is_cloud();
+    // 本地模型串行占用内存;云端模型只受云端并发上限约束
+    let _permit = if cloud {
+        permit(&core.stages.llm_cloud).await?
+    } else {
+        permit(&core.stages.llm_local).await?
+    };
+    if !cloud {
+        let installed: Vec<String> = ollama
+            .list_models()
+            .await?
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        if !model_installed(&installed, &s.vision_model) {
+            return Err(AppError::ModelMissing(s.vision_model.clone()));
+        }
     }
     let meta = tokio::fs::metadata(abs).await?;
     if meta.len() > MAX_IMAGE_BYTES {
@@ -217,7 +227,9 @@ async fn run_vision(
     let bytes = tokio::fs::read(abs).await?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    core.prepare_chat_model(&s.vision_model).await;
+    if !cloud {
+        core.prepare_chat_model(&model).await;
+    }
     let schema = prompts::vision_schema();
     for attempt in 0..3 {
         if token.is_cancelled() {
@@ -225,8 +237,8 @@ async fn run_vision(
         }
         let msgs = prompts::vision_messages(&item.content, b64.clone());
         let temp = if attempt == 0 { 0.1 } else { 0.4 };
-        match ollama
-            .chat_json::<VisionResult>(&s.vision_model, &msgs, &core.gen_opts(temp), &schema)
+        match client
+            .chat_json::<VisionResult>(&model, &msgs, &core.gen_opts(temp), &schema)
             .await
         {
             Ok(v) => return Ok(Some(v)),
@@ -438,16 +450,18 @@ pub async fn process_item(
         .map(|p| build_embed_input(&item.kind, &title, &meta, p))
         .collect();
     // 批次并发向量化:buffered 保持结果顺序,全局信号量限制 Ollama 同时承受的请求数
+    let embedder = core.embedder()?;
+    let embed_identity = s.embed_identity();
     let batches: Vec<Vec<String>> = inputs.chunks(EMBED_BATCH).map(|b| b.to_vec()).collect();
     let embedded: Vec<Vec<Vec<f32>>> = stream::iter(batches)
         .map(|batch| {
-            let (ollama, model, keep) = (&ollama, &s.embed_model, &s.keep_alive);
+            let embedder = &embedder;
             async move {
                 if token.is_cancelled() {
                     return Err(AppError::Cancelled);
                 }
                 let _p = permit(&core.stages.embed).await?;
-                ollama.embed(model, &batch, keep).await
+                embedder.embed(&batch).await
             }
         })
         .buffered(EMBED_CONCURRENCY)
@@ -472,7 +486,7 @@ pub async fn process_item(
     // 分词与编码向量吃 CPU:放到阻塞线程并受 CPU 许可限流
     let (new_chunks, vectors): (Vec<NewChunk>, Vec<Vec<f32>>) = {
         let _cpu = permit(&core.stages.cpu).await?;
-        let (pieces, embed_model, title) = (pieces.clone(), s.embed_model.clone(), title.clone());
+        let (pieces, embed_model, title) = (pieces.clone(), embed_identity.clone(), title.clone());
         let (tags_text, summary_text, doc_summary) =
             (tags_text.clone(), summary_text.clone(), doc_summary.clone());
         tokio::task::spawn_blocking(move || {
@@ -522,7 +536,7 @@ pub async fn process_item(
         model: if !ai_used {
             None
         } else if vision.is_some() {
-            Some(s.vision_model.clone())
+            Some(s.active_vision_model().to_string())
         } else {
             Some(s.active_text_model().to_string())
         },
@@ -558,7 +572,7 @@ pub async fn process_item(
         .with(|c| Ok(repo::get_item(c, item_id)?.map(|i| i.kb_id)))?
         .unwrap_or(crate::db::DEFAULT_KB_ID);
     core.vindex
-        .replace_item_in(&s.embed_model, item_id, kb_id, entries);
+        .replace_item_in(&embed_identity, item_id, kb_id, entries);
     Ok(())
 }
 

@@ -194,13 +194,18 @@ pub fn final_score(rerank_prob: f32, recency: f32) -> f32 {
     rerank_prob + 0.03 * ((recency - 1.0) / 0.2).clamp(0.0, 1.0)
 }
 
-/// 用本地模型对候选重排序;未启用、未下载、失败或超时都保持原有 RRF 顺序
 /// 本次检索是否会执行重排序(已开启、模型已安装且候选不少于 2 条)
 fn rerank_applicable(core: &Core, n: usize) -> bool {
     let s = core.settings();
     s.rerank_enabled && n >= 2 && crate::rerank::is_installed(&core.paths.root, &s.rerank_model)
 }
 
+/// 查询向量化(按设置走本地或云端)
+async fn embed_query(core: &Core, query: &str) -> Result<Vec<Vec<f32>>> {
+    core.embedder()?.embed(&[query.to_string()]).await
+}
+
+/// 用本地模型对候选重排序;未启用、未下载、失败或超时都保持原有 RRF 顺序
 async fn rerank_hits(core: &Core, query: &str, hits: &mut [Hit]) {
     let s = core.settings();
     if !rerank_applicable(core, hits.len()) {
@@ -266,28 +271,17 @@ pub async fn hybrid_search_with_stage(
     // 向量路(失败降级);相同问题命中 LRU 缓存则免去向量化往返
     on_stage("retrieve");
     let mut vec_hits: Vec<crate::vector::VecHit> = Vec::new();
-    let cached = core
-        .query_vecs
-        .lock()
-        .unwrap()
-        .get(&settings.embed_model, query);
+    let identity = settings.embed_identity();
+    let cached = core.query_vecs.lock().unwrap().get(&identity, query);
     let qvec = match cached {
         Some(v) => Some(v),
-        None => match core
-            .ollama()
-            .embed(
-                &settings.embed_model,
-                &[query.to_string()],
-                &settings.keep_alive,
-            )
-            .await
-        {
+        None => match embed_query(core, query).await {
             Ok(mut v) if !v.is_empty() => {
                 let v = v.remove(0);
                 core.query_vecs
                     .lock()
                     .unwrap()
-                    .put(&settings.embed_model, query, v.clone());
+                    .put(&identity, query, v.clone());
                 Some(v)
             }
             Ok(_) => None,

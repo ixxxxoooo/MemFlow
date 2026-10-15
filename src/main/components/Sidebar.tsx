@@ -1,6 +1,7 @@
 // @author ygw
 // 左栏:导航 + Ollama 状态呼吸灯 + 后台队列状态
 
+import { needsOllama } from "../../lib/modelSource";
 import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
 import { ChatIcon, LibraryIcon, PlusIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
@@ -21,12 +22,14 @@ export function Sidebar() {
   const textModel = current?.label ?? (status?.settings.llmProvider === "openai_compat" ? status.settings.llmModel : status?.settings.textModel) ?? "";
   const missing = status?.models.filter((m) => m.required && !m.installed) ?? [];
 
+  // 文本、向量、视觉都选了云端时不依赖 Ollama
+  const ollamaNeeded = status ? needsOllama(status.models) : true;
   let dot = "var(--ok)";
-  let label = `Ollama 运行中 · 问答 ${textModel}`;
+  let label = ollamaNeeded ? `Ollama 运行中 · 问答 ${textModel}` : `云端模型 · 问答 ${textModel}`;
   if (!status) {
     dot = "var(--fg-faint)";
     label = "正在检测 Ollama…";
-  } else if (!running) {
+  } else if (!running && ollamaNeeded) {
     dot = "var(--err)";
     label = "Ollama 未运行";
   } else if (missing.length > 0) {

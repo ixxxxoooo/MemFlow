@@ -3,7 +3,8 @@
 //! 与 Tauri 解耦(通过 EventSink 抽象),便于集成测试。
 
 use crate::db::Db;
-use crate::error::Result;
+use crate::embed::EmbedClient;
+use crate::error::{AppError, Result};
 use crate::llm::LlmClient;
 use crate::ollama::{build_http, GenOptions, OllamaClient};
 use crate::openai::{build_cloud_http, OpenAiClient};
@@ -236,7 +237,9 @@ impl Core {
             chat_cancel: Mutex::new(None),
             reranker: crate::rerank::Reranker::default(),
         };
-        let n = core.vindex.load_from_db(&core.db, &settings.embed_model)?;
+        let n = core
+            .vindex
+            .load_from_db(&core.db, &settings.embed_identity())?;
         tracing::info!("向量索引已载入 {n} 条");
         crate::queue::recover_after_crash(&core.db)?;
         Ok(Arc::new(core))
@@ -266,8 +269,8 @@ impl Core {
             .with(|c| repo::set_setting(c, "app", &serde_json::to_string(&new)?))?;
         *self.settings.write().unwrap() = new.clone();
         self.invalidate_probe();
-        if old.embed_model != new.embed_model {
-            self.vindex.load_from_db(&self.db, &new.embed_model)?;
+        if old.embed_identity() != new.embed_identity() {
+            self.vindex.load_from_db(&self.db, &new.embed_identity())?;
         }
         // 关闭重排序或切换模型后释放旧会话(约数百 MB 内存)
         if !new.rerank_enabled || old.rerank_model != new.rerank_model {
@@ -480,6 +483,58 @@ impl Core {
             LlmClient::OpenAi(c)
         } else {
             LlmClient::Ollama(self.ollama())
+        }
+    }
+
+    /// 构造某云端档案的客户端(读取该档案的密钥)
+    ///
+    /// 参数: profile 档案标识(default 为默认云端配置)
+    /// 返回: 客户端;档案不存在返回 Invalid。密钥缺失时仍返回客户端,发请求时给出"未配置/读取失败"的准确提示
+    pub fn cloud_client_for(&self, profile: &str) -> Result<OpenAiClient> {
+        let base = self
+            .settings()
+            .profile_base_url(profile)
+            .ok_or_else(|| AppError::Invalid("所选云端档案已被删除".into()))?;
+        let (key, why) = match self.key_try(profile, false) {
+            Ok(k) => (k.unwrap_or_default(), None),
+            Err(e) => (String::new(), Some(e)),
+        };
+        let mut c = OpenAiClient::new(self.cloud_http.clone(), &base, &key);
+        if let Some(w) = why {
+            c = c.with_missing_key_reason(w);
+        }
+        Ok(c)
+    }
+
+    /// 获取向量化后端:云端走 `/embeddings`,否则走本地 Ollama
+    pub fn embedder(&self) -> Result<EmbedClient> {
+        let s = self.settings();
+        if s.uses_cloud_embed() {
+            Ok(EmbedClient::Cloud {
+                client: self.cloud_client_for(&s.embed_profile)?,
+                model: s.embed_cloud_model.trim().to_string(),
+            })
+        } else {
+            Ok(EmbedClient::Ollama {
+                client: self.ollama(),
+                model: s.embed_model.clone(),
+                keep_alive: s.keep_alive.clone(),
+            })
+        }
+    }
+
+    /// 获取视觉模型后端
+    ///
+    /// 返回: (客户端, 模型名);云端时无需本地模型与内存调度
+    pub fn vision_backend(&self) -> Result<(LlmClient, String)> {
+        let s = self.settings();
+        if s.uses_cloud_vision() {
+            Ok((
+                LlmClient::OpenAi(self.cloud_client_for(&s.vision_profile)?),
+                s.vision_cloud_model.trim().to_string(),
+            ))
+        } else {
+            Ok((LlmClient::Ollama(self.ollama()), s.vision_model.clone()))
         }
     }
 

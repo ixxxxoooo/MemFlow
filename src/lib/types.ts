@@ -205,7 +205,21 @@ export interface Settings {
   hfMirror: string;
   /** 额外的云端模型档案(对话里可切换) */
   llmProfiles: LlmProfile[];
+  /** 向量模型来源:ollama 本地 / openai_compat 云端 */
+  embedProvider: ModelProvider;
+  /** 向量模型使用的云端档案("default" 为默认云端配置) */
+  embedProfile: string;
+  /** 云端向量模型名 */
+  embedCloudModel: string;
+  /** 视觉模型来源 */
+  visionProvider: ModelProvider;
+  visionProfile: string;
+  /** 云端视觉模型名 */
+  visionCloudModel: string;
 }
+
+/** 模型来源 */
+export type ModelProvider = "ollama" | "openai_compat";
 
 /** 额外的云端模型档案;密钥单独存放在钥匙串 */
 export interface LlmProfile {

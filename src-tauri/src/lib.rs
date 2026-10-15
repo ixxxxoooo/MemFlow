@@ -7,6 +7,7 @@ pub mod chunker;
 pub mod commands;
 pub mod core;
 pub mod db;
+pub mod embed;
 pub mod error;
 pub mod extract;
 pub mod folder;
@@ -109,6 +110,7 @@ pub fn run() {
             commands::retry_key_access,
             commands::reveal_api_key,
             commands::test_llm_connection,
+            commands::test_cloud_model,
             commands::cancel_pull,
             commands::rerank_models,
             commands::download_rerank_model,

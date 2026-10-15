@@ -134,7 +134,7 @@ pub async fn list_chat_models(core: &Core) -> Vec<ChatModelOption> {
     out
 }
 
-/// 预热对话与向量模型,让首次提问不再等待模型加载
+/// 预热对话与(本地)向量模型,让首次提问不再等待模型加载
 ///
 /// 云端模型无需预热(也不会读取钥匙串);只有本地模型才会载入内存。
 ///
@@ -146,8 +146,14 @@ pub async fn warm(core: &Core, model_ref: Option<&str>) {
         None => default_ref(&s),
     };
     let ollama = core.ollama();
-    // 向量模型总是在本机,提问第一步就要用
-    let embed = ollama.preload(&s.embed_model, &s.keep_alive, s.num_ctx);
+    // 云端向量模型无需预热
+    let embed = async {
+        if !s.uses_cloud_embed() {
+            ollama
+                .preload(&s.embed_model, &s.keep_alive, s.num_ctx)
+                .await;
+        }
+    };
     let chat = async {
         if let Some(name) = r.strip_prefix("ollama:").filter(|n| !n.is_empty()) {
             core.prepare_chat_model(name).await;

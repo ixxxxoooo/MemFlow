@@ -48,6 +48,18 @@ pub struct Settings {
     pub pdf_parse_mode: String,
     /// 额外的云端模型档案(对话时可自由切换;默认云端配置不在此列)
     pub llm_profiles: Vec<LlmProfile>,
+    /// 向量模型来源:ollama(本地)或 openai_compat(云端 `/embeddings`)
+    pub embed_provider: String,
+    /// 向量模型使用的云端档案("default" 为默认云端配置,否则为档案标识)
+    pub embed_profile: String,
+    /// 云端向量模型名(如 text-embedding-v3)
+    pub embed_cloud_model: String,
+    /// 视觉模型来源:ollama(本地)或 openai_compat(云端多模态对话接口)
+    pub vision_provider: String,
+    /// 视觉模型使用的云端档案
+    pub vision_profile: String,
+    /// 云端视觉模型名(如 qwen-vl-plus)
+    pub vision_cloud_model: String,
     /// 是否启用本地重排序(模型未下载时自动跳过)
     pub rerank_enabled: bool,
     /// 重排序模型标识(见 `rerank::SPECS`)
@@ -108,6 +120,12 @@ impl Default for Settings {
             import_concurrency: 0,
             pdf_parse_mode: PDF_MODE_AUTO.into(),
             llm_profiles: Vec::new(),
+            embed_provider: PROVIDER_OLLAMA.into(),
+            embed_profile: crate::secrets::DEFAULT_PROFILE.into(),
+            embed_cloud_model: String::new(),
+            vision_provider: PROVIDER_OLLAMA.into(),
+            vision_profile: crate::secrets::DEFAULT_PROFILE.into(),
+            vision_cloud_model: String::new(),
             rerank_enabled: true,
             rerank_model: crate::rerank::DEFAULT_MODEL.into(),
             hf_mirror: "https://hf-mirror.com".into(),
@@ -127,6 +145,56 @@ impl Settings {
             &self.llm_model
         } else {
             &self.text_model
+        }
+    }
+
+    /// 向量模型是否使用云端
+    pub fn uses_cloud_embed(&self) -> bool {
+        self.embed_provider == PROVIDER_OPENAI
+    }
+
+    /// 视觉模型是否使用云端
+    pub fn uses_cloud_vision(&self) -> bool {
+        self.vision_provider == PROVIDER_OPENAI
+    }
+
+    /// 向量来源标识:写入每个切片的 `embed_model`,用于判断向量是否过期。
+    ///
+    /// 本地沿用模型名(与旧数据兼容);云端为 `cloud:档案:模型名`。
+    /// 不同模型的向量空间互不兼容,标识变化后旧向量会被视为过期并提示重建。
+    pub fn embed_identity(&self) -> String {
+        if self.uses_cloud_embed() {
+            format!(
+                "cloud:{}:{}",
+                self.embed_profile,
+                self.embed_cloud_model.trim()
+            )
+        } else {
+            self.embed_model.clone()
+        }
+    }
+
+    /// 当前生效的视觉模型名(云端取云端模型名)
+    pub fn active_vision_model(&self) -> &str {
+        if self.uses_cloud_vision() {
+            self.vision_cloud_model.trim()
+        } else {
+            &self.vision_model
+        }
+    }
+
+    /// 云端档案的接口地址
+    ///
+    /// 参数: profile 档案标识,default 为默认云端配置
+    /// 返回: 地址;档案不存在返回 None
+    pub fn profile_base_url(&self, profile: &str) -> Option<String> {
+        if profile == crate::secrets::DEFAULT_PROFILE {
+            Some(self.llm_base_url.clone())
+        } else {
+            self.llm_profiles
+                .iter()
+                .find(|p| p.id == profile)
+                .map(|p| p.base_url.clone())
         }
     }
 
@@ -170,6 +238,36 @@ impl Settings {
             }
             if self.llm_model.trim().is_empty() {
                 return Err(AppError::Invalid("云端模型名不能为空".into()));
+            }
+        }
+        for (what, provider, profile, model) in [
+            (
+                "向量",
+                &self.embed_provider,
+                &self.embed_profile,
+                &self.embed_cloud_model,
+            ),
+            (
+                "视觉",
+                &self.vision_provider,
+                &self.vision_profile,
+                &self.vision_cloud_model,
+            ),
+        ] {
+            if provider != PROVIDER_OLLAMA && provider != PROVIDER_OPENAI {
+                return Err(AppError::Invalid(format!(
+                    "{what}模型来源只能是 ollama 或 openai_compat"
+                )));
+            }
+            if provider == PROVIDER_OPENAI {
+                if model.trim().is_empty() {
+                    return Err(AppError::Invalid(format!("云端{what}模型名不能为空")));
+                }
+                if self.profile_base_url(profile).is_none() {
+                    return Err(AppError::Invalid(format!(
+                        "{what}模型所选的云端档案已不存在"
+                    )));
+                }
             }
         }
         if self.pdf_parse_mode != PDF_MODE_AUTO && self.pdf_parse_mode != PDF_MODE_VISION {
@@ -345,6 +443,47 @@ mod tests {
         // 旧版设置没有档案字段时默认为空
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(old.llm_profiles.is_empty());
+    }
+
+    #[test]
+    fn 向量与视觉可选云端() {
+        // 默认本地,标识沿用模型名(兼容旧数据)
+        let d = Settings::default();
+        assert!(!d.uses_cloud_embed() && !d.uses_cloud_vision());
+        assert_eq!(d.embed_identity(), "bge-m3");
+        assert_eq!(d.active_vision_model(), "minicpm-v");
+        // 云端:标识带档案与模型名
+        let c = Settings {
+            embed_provider: PROVIDER_OPENAI.into(),
+            embed_cloud_model: " text-embedding-v3 ".into(),
+            vision_provider: PROVIDER_OPENAI.into(),
+            vision_cloud_model: "qwen-vl-plus".into(),
+            ..Settings::default()
+        };
+        assert!(c.validate().is_ok());
+        assert_eq!(c.embed_identity(), "cloud:default:text-embedding-v3");
+        assert_eq!(c.active_vision_model(), "qwen-vl-plus");
+        // 云端缺模型名 / 档案不存在 / 来源非法
+        let no_model = Settings {
+            embed_provider: PROVIDER_OPENAI.into(),
+            ..Settings::default()
+        };
+        assert!(no_model.validate().is_err());
+        let no_profile = Settings {
+            vision_provider: PROVIDER_OPENAI.into(),
+            vision_cloud_model: "m".into(),
+            vision_profile: "ghost".into(),
+            ..Settings::default()
+        };
+        assert!(no_profile.validate().is_err());
+        let bad = Settings {
+            embed_provider: "x".into(),
+            ..Settings::default()
+        };
+        assert!(bad.validate().is_err());
+        // 旧设置缺字段时回落本地
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.uses_cloud_embed() && !old.uses_cloud_vision());
     }
 
     #[test]

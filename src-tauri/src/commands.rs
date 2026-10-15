@@ -93,12 +93,22 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
     let probe = core.probe_ollama(false).await;
     let (running, version, installed) = (probe.running, probe.version, probe.installed);
     let cloud = settings.uses_cloud_llm();
-    let mut models = vec![ModelNeed {
-        role: "向量模型".into(),
-        name: settings.embed_model.clone(),
-        installed: model_installed(&installed, &settings.embed_model),
-        required: true,
-        local: true,
+    let mut models = vec![if settings.uses_cloud_embed() {
+        ModelNeed {
+            role: "向量模型(云端)".into(),
+            name: settings.embed_cloud_model.clone(),
+            installed: core.key_present(&settings.embed_profile),
+            required: true,
+            local: false,
+        }
+    } else {
+        ModelNeed {
+            role: "向量模型".into(),
+            name: settings.embed_model.clone(),
+            installed: model_installed(&installed, &settings.embed_model),
+            required: true,
+            local: true,
+        }
     }];
     if cloud {
         models.push(ModelNeed {
@@ -117,16 +127,26 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
             local: true,
         });
     }
-    models.push(ModelNeed {
-        role: "视觉模型".into(),
-        name: settings.vision_model.clone(),
-        installed: model_installed(&installed, &settings.vision_model),
-        required: settings.vision_enabled,
-        local: true,
+    models.push(if settings.uses_cloud_vision() {
+        ModelNeed {
+            role: "视觉模型(云端)".into(),
+            name: settings.vision_cloud_model.clone(),
+            installed: core.key_present(&settings.vision_profile),
+            required: settings.vision_enabled,
+            local: false,
+        }
+    } else {
+        ModelNeed {
+            role: "视觉模型".into(),
+            name: settings.vision_model.clone(),
+            installed: model_installed(&installed, &settings.vision_model),
+            required: settings.vision_enabled,
+            local: true,
+        }
     });
     let stats = core
         .db
-        .with_read(|c| repo::stats(c, &settings.embed_model))?;
+        .with_read(|c| repo::stats(c, &settings.embed_identity()))?;
     Ok(AppStatus {
         ollama_running: running,
         ollama_version: version,
@@ -373,6 +393,44 @@ pub async fn test_llm_connection(
         }
     };
     core.cloud_client(base, &key).ping(model.trim()).await
+}
+
+/// 测试云端向量/视觉模型连接(使用界面上尚未保存的档案与模型名)
+///
+/// 参数: kind embed 或 vision;profile_id 档案标识(None 为默认云端配置);model 模型名;
+/// key 临时密钥(为空则用已保存的密钥)
+#[tauri::command]
+pub async fn test_cloud_model(
+    core: S<'_>,
+    kind: String,
+    profile_id: Option<String>,
+    model: String,
+    key: Option<String>,
+) -> Result<String> {
+    if model.trim().is_empty() {
+        return Err(AppError::Invalid("云端模型名不能为空".into()));
+    }
+    let pid = profile_id
+        .as_deref()
+        .unwrap_or(crate::secrets::DEFAULT_PROFILE);
+    let base = core
+        .settings()
+        .profile_base_url(pid)
+        .ok_or_else(|| AppError::Invalid("所选云端档案不存在".into()))?;
+    let key = match key.filter(|k| !k.trim().is_empty()) {
+        Some(k) => k,
+        None => {
+            let r = core.key_try(pid, true);
+            queue::emit_status(&core);
+            r.map_err(AppError::Invalid)?.unwrap_or_default()
+        }
+    };
+    let client = core.cloud_client(&base, &key);
+    match kind.as_str() {
+        "embed" => client.ping_embed(model.trim()).await,
+        "vision" => client.ping_vision(model.trim()).await,
+        _ => Err(AppError::Invalid("kind 只能是 embed 或 vision".into())),
+    }
 }
 
 /// 取消模型拉取

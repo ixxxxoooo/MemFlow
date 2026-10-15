@@ -60,6 +60,18 @@ describe("StatusBanner", () => {
     expect(el.textContent).not.toContain("尚未配置 API Key");
   });
 
+  it("Ollama 未运行:仍需要本地模型时提示启动;全部选云端时不提示", () => {
+    const cloud = { role: "文本模型(云端)", name: "m", installed: true, required: true, local: false };
+    const localEmbed = { role: "向量模型", name: "bge-m3", installed: true, required: true, local: true };
+    useApp.setState({ status: cloudStatus({ ollamaRunning: false, models: [cloud, localEmbed] }) });
+    act(() => root.render(<StatusBanner />));
+    expect(el.textContent).toContain("未检测到 Ollama");
+    act(() => {
+      useApp.setState({ status: cloudStatus({ ollamaRunning: false, models: [cloud, { ...localEmbed, local: false, role: "向量模型(云端)" }] }) });
+    });
+    expect(el.textContent).not.toContain("未检测到 Ollama");
+  });
+
   it("换了一个云端模型,会重新提示", () => {
     act(() => root.render(<StatusBanner />));
     act(() => (el.querySelector('button[aria-label="关闭提示"]') as HTMLButtonElement).click());
