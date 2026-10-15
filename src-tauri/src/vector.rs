@@ -280,6 +280,43 @@ mod tests {
         assert!(idx.is_empty());
     }
 
+    /// 基准:暴力检索在不同规模下的耗时(1024 维,同 bge-m3)。
+    /// 运行: cargo test --release bench_暴力检索 -- --ignored --nocapture
+    #[test]
+    #[ignore = "性能基准,手动运行"]
+    fn bench_暴力检索() {
+        for n in [10_000usize, 50_000, 100_000] {
+            let idx = VectorIndex::new();
+            idx.reset("m");
+            // 简单线性同余生成伪随机向量,避免引入随机数依赖
+            let mut seed: u32 = 12345;
+            let mut next = || {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+            };
+            for i in 0..n {
+                let v: Vec<f32> = (0..1024).map(|_| next()).collect();
+                idx.replace_item(
+                    "m",
+                    i as i64,
+                    vec![Entry {
+                        chunk_id: i as i64,
+                        vec: unit(&v),
+                    }],
+                );
+            }
+            let q: Vec<f32> = (0..1024).map(|_| next()).collect();
+            let runs = 5;
+            let t = std::time::Instant::now();
+            for _ in 0..runs {
+                std::hint::black_box(idx.search(&q, 30));
+            }
+            let ms = t.elapsed().as_secs_f64() * 1000.0 / runs as f64;
+            let mb = (n * 1024 * 4) as f64 / 1024.0 / 1024.0;
+            println!("N={n:>7}  单次检索 {ms:>7.1} ms  向量内存约 {mb:>6.0} MB");
+        }
+    }
+
     #[test]
     fn 非法向量不检索() {
         let idx = VectorIndex::new();
