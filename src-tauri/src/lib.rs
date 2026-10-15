@@ -10,6 +10,7 @@ pub mod db;
 pub mod error;
 pub mod extract;
 pub mod ingest;
+pub mod kb;
 pub mod layout;
 pub mod llm;
 pub mod logging;
@@ -107,6 +108,11 @@ pub fn run() {
             commands::download_rerank_model,
             commands::get_settings,
             commands::update_settings,
+            commands::list_kbs,
+            commands::create_kb,
+            commands::rename_kb,
+            commands::delete_kb,
+            commands::move_items,
             commands::capture_submit,
             commands::stage_file,
             commands::list_items,

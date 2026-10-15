@@ -76,6 +76,7 @@ fn opts() -> SearchOptions {
     SearchOptions {
         top_n: 3,
         threshold: 0.1,
+        kb_ids: None,
     }
 }
 

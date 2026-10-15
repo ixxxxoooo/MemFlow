@@ -497,7 +497,13 @@ pub async fn process_item(
         .zip(vectors)
         .map(|(chunk_id, vec)| Entry { chunk_id, vec })
         .collect();
-    core.vindex.replace_item(&s.embed_model, item_id, entries);
+    // 紧贴写入前读取最新归属,避免处理期间被转移到别的知识库后写入旧归属
+    let kb_id = core
+        .db
+        .with(|c| Ok(repo::get_item(c, item_id)?.map(|i| i.kb_id)))?
+        .unwrap_or(crate::db::DEFAULT_KB_ID);
+    core.vindex
+        .replace_item_in(&s.embed_model, item_id, kb_id, entries);
     Ok(())
 }
 

@@ -442,6 +442,7 @@ async fn 删除记录后不再被检索到() {
         &memflow_lib::retrieval::SearchOptions {
             top_n: 5,
             threshold: 0.1,
+            kb_ids: None,
         },
     )
     .await

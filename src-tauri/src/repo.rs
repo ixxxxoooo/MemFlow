@@ -859,6 +859,27 @@ pub fn move_items(c: &Connection, ids: &[i64], kb_id: i64) -> Result<(Vec<i64>, 
     Ok((moved, skipped))
 }
 
+/// 查询一批主记录关联的子记录(如文档里引用的图片)
+///
+/// 图片关联表(item_links)在后续迁移中引入;表尚不存在时返回空。
+pub fn linked_children(c: &Connection, parent_ids: &[i64]) -> Result<Vec<i64>> {
+    let has_table: i64 = c.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='item_links'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_table == 0 || parent_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let sql = format!(
+        "SELECT DISTINCT child_id FROM item_links WHERE parent_id IN ({})",
+        vec!["?"; parent_ids.len()].join(",")
+    );
+    let mut stmt = c.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(parent_ids.iter()), |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 /// 统计引用某附件路径的记录数(删除记录时判断能否删除文件)
 pub fn count_attachment_refs(c: &Connection, path: &str) -> Result<i64> {
     Ok(c.query_row(

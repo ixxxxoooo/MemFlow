@@ -32,6 +32,19 @@ const REWRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(12
 pub const NO_RESULT_ANSWER: &str =
     "记录中没有找到与这个问题相关的内容。你可以换个说法再问,或先把相关信息记录/导入进来。";
 
+/// 限定了知识库范围时的无资料回复:点明范围,并提示可以去掉 @ 改为全库搜索
+///
+/// 参数: kb_names 当前限定的知识库名称
+pub fn no_result_answer_in(kb_names: &[String]) -> String {
+    if kb_names.is_empty() {
+        return NO_RESULT_ANSWER.to_string();
+    }
+    format!(
+        "在所选知识库({})中没有找到与这个问题相关的内容。你可以换个说法再问,或去掉输入框里的 @ 限定,在全部知识库中搜索。",
+        kb_names.join("、")
+    )
+}
+
 /// 推送给前端的问答事件
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -64,6 +77,9 @@ pub struct SourceView {
     pub chunk_id: i64,
     pub item_id: i64,
     pub kind: String,
+    /// 所属知识库 id 与名称(名称在 ask 中补全)
+    pub kb_id: i64,
+    pub kb_name: Option<String>,
     pub title: Option<String>,
     pub text: String,
     pub heading: Option<String>,
@@ -86,6 +102,8 @@ pub fn to_sources(hits: &[Hit]) -> Vec<SourceView> {
             chunk_id: h.chunk_id,
             item_id: h.item_id,
             kind: h.kind.clone(),
+            kb_id: h.kb_id,
+            kb_name: None,
             title: h.title.clone(),
             text: h.text.clone(),
             heading: h.heading.clone(),
@@ -351,6 +369,48 @@ pub async fn ask(
     model_ref: Option<&str>,
     emit: &(dyn Fn(ChatEvent) + Send + Sync),
 ) -> Result<()> {
+    ask_in(core, session_id, question, model_ref, None, emit).await
+}
+
+/// 解析本次问答的知识库范围
+///
+/// 参数: requested 前端传入的范围(None = 沿用会话已保存的范围);saved 会话已保存范围
+/// 返回: (有效范围(空 = 全部), 范围内的知识库名称)
+fn resolve_scope(
+    core: &Core,
+    requested: Option<&[i64]>,
+    saved: &[i64],
+) -> Result<(Vec<i64>, Vec<String>)> {
+    let kbs = core.db.with_read(repo::list_kbs)?;
+    let wanted: Vec<i64> = requested.unwrap_or(saved).to_vec();
+    let mut scope: Vec<i64> = Vec::new();
+    for id in &wanted {
+        if kbs.iter().any(|k| k.id == *id) && !scope.contains(id) {
+            scope.push(*id);
+        }
+    }
+    // 明确选择的库都已不存在:提示重选,而不是悄悄搜全部
+    if requested.is_some() && !wanted.is_empty() && scope.is_empty() {
+        return Err(AppError::Invalid("所选知识库已不存在,请重新选择".into()));
+    }
+    let names = scope
+        .iter()
+        .filter_map(|id| kbs.iter().find(|k| k.id == *id).map(|k| k.name.clone()))
+        .collect();
+    Ok((scope, names))
+}
+
+/// 执行一次问答,并可限定知识库范围
+///
+/// 参数: 同 `ask`;kb_ids 为 Some 时覆盖并保存到会话(空数组 = 搜索全部),为 None 沿用会话已保存的范围
+pub async fn ask_in(
+    core: &Arc<Core>,
+    session_id: Option<i64>,
+    question: &str,
+    model_ref: Option<&str>,
+    kb_ids: Option<&[i64]>,
+    emit: &(dyn Fn(ChatEvent) + Send + Sync),
+) -> Result<()> {
     let started = std::time::Instant::now();
     let q = question.trim();
     if q.is_empty() {
@@ -377,6 +437,11 @@ pub async fn ask(
             core.db.with(|c| repo::create_session(c, &title))?
         }
     };
+    let saved_scope = core.db.with_read(|c| repo::get_session_kbs(c, sid))?;
+    let (scope, scope_names) = resolve_scope(core, kb_ids, &saved_scope)?;
+    if kb_ids.is_some() {
+        core.db.with(|c| repo::set_session_kbs(c, sid, &scope))?;
+    }
     let prior = core.db.with_read(|c| repo::list_messages(c, sid))?;
     core.db
         .with(|c| repo::add_message(c, sid, "user", q, None).map(|_| ()))?;
@@ -392,6 +457,11 @@ pub async fn ask(
     let opts = SearchOptions {
         top_n: settings.top_k,
         threshold: settings.score_threshold,
+        kb_ids: if scope.is_empty() {
+            None
+        } else {
+            Some(scope.clone())
+        },
     };
     let stage = |name: &str| {
         emit(ChatEvent::Stage {
@@ -425,22 +495,17 @@ pub async fn ask(
 
     // 无资料:拒答
     if hits.is_empty() {
+        let refusal = no_result_answer_in(&scope_names);
         let id = core.db.with(|c| {
-            repo::add_message(
-                c,
-                sid,
-                "assistant",
-                NO_RESULT_ANSWER,
-                Some(&serde_json::json!([])),
-            )
+            repo::add_message(c, sid, "assistant", &refusal, Some(&serde_json::json!([])))
         })?;
         emit(ChatEvent::Sources { sources: vec![] });
         emit(ChatEvent::Token {
-            text: NO_RESULT_ANSWER.into(),
+            text: refusal.clone(),
         });
         emit(ChatEvent::Done {
             message_id: id,
-            answer: NO_RESULT_ANSWER.into(),
+            answer: refusal,
             stopped: false,
             meta: None,
         });
@@ -450,7 +515,13 @@ pub async fn ask(
     // 先去掉重复/近似重复的资料,再按字符预算截取
     let hits = dedup_hits(hits);
     let (context, used) = build_context(&hits);
-    let sources = to_sources(&hits[..used]);
+    let mut sources = to_sources(&hits[..used]);
+    // 补全来源所在知识库名称,便于在多个知识库间分辨
+    if let Ok(kbs) = core.db.with_read(repo::list_kbs) {
+        for s in &mut sources {
+            s.kb_name = kbs.iter().find(|k| k.id == s.kb_id).map(|k| k.name.clone());
+        }
+    }
     emit(ChatEvent::Sources {
         sources: sources.clone(),
     });
@@ -614,6 +685,7 @@ mod tests {
             chunk_id: 1,
             item_id: 1,
             kind: kind.into(),
+            kb_id: 1,
             title: Some("标题".into()),
             text: text.into(),
             heading: None,
@@ -642,6 +714,14 @@ mod tests {
         assert!(t.contains("A[9] --> B[1]"));
         assert!(!t.contains("[7]"));
         assert!(t.contains("[1]\n```mermaid"));
+    }
+
+    #[test]
+    fn 限定范围的拒答文案点明范围并提示去掉限定() {
+        assert_eq!(no_result_answer_in(&[]), NO_RESULT_ANSWER);
+        let t = no_result_answer_in(&["工作".to_string(), "读书".to_string()]);
+        assert!(t.contains("工作、读书"));
+        assert!(t.contains("去掉"));
     }
 
     #[test]

@@ -40,6 +40,8 @@ pub struct VecHit {
 
 /// 一条记录的全部切片向量(平铺存储)
 struct Block {
+    /// 所属知识库(转移记录时只改这里,不必重新嵌入)
+    kb_id: i64,
     /// 向量维度
     dim: usize,
     /// 各切片 id,与 `data` 按序对应
@@ -50,7 +52,7 @@ struct Block {
 
 impl Block {
     /// 由条目构建;以第一个合法条目的维度为准,维度不同的条目被丢弃
-    fn from_entries(entries: Vec<Entry>) -> Option<Self> {
+    fn from_entries(kb_id: i64, entries: Vec<Entry>) -> Option<Self> {
         let dim = entries.first()?.vec.len();
         if dim == 0 {
             return None;
@@ -65,6 +67,7 @@ impl Block {
             data.extend_from_slice(&e.vec);
         }
         Some(Self {
+            kb_id,
             dim,
             chunk_ids,
             data,
@@ -196,20 +199,30 @@ impl VectorIndex {
     /// 参数: db 数据库;model 当前嵌入模型名
     /// 返回: 载入的向量条数
     pub fn load_from_db(&self, db: &Db, model: &str) -> Result<usize> {
-        let mut grouped: HashMap<i64, Vec<Entry>> = HashMap::new();
+        let mut grouped: HashMap<i64, (i64, Vec<Entry>)> = HashMap::new();
         let mut count = 0usize;
         db.with_read(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, item_id, embedding FROM chunks WHERE embed_model = ?1 AND embedding IS NOT NULL",
+                "SELECT c.id, c.item_id, c.embedding, i.kb_id FROM chunks c JOIN items i ON i.id = c.item_id \
+                 WHERE c.embed_model = ?1 AND c.embedding IS NOT NULL",
             )?;
             let rows = stmt.query_map([model], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
             })?;
             for row in rows {
-                let (chunk_id, item_id, blob) = row?;
+                let (chunk_id, item_id, blob, kb_id) = row?;
                 let vec = decode(&blob);
                 if is_valid(&vec) {
-                    grouped.entry(item_id).or_default().push(Entry { chunk_id, vec });
+                    grouped
+                        .entry(item_id)
+                        .or_insert_with(|| (kb_id, Vec::new()))
+                        .1
+                        .push(Entry { chunk_id, vec });
                     count += 1;
                 }
             }
@@ -217,7 +230,7 @@ impl VectorIndex {
         })?;
         let items: HashMap<i64, Block> = grouped
             .into_iter()
-            .filter_map(|(id, es)| Block::from_entries(es).map(|b| (id, b)))
+            .filter_map(|(id, (kb, es))| Block::from_entries(kb, es).map(|b| (id, b)))
             .collect();
         let mut g = self.inner.write().unwrap();
         g.model = model.to_string();
@@ -227,18 +240,35 @@ impl VectorIndex {
 
     /// 替换某条记录的全部向量
     ///
-    /// 参数: model 向量所属模型(与索引当前模型不一致则忽略);item_id 记录 id;entries 新向量
-    pub fn replace_item(&self, model: &str, item_id: i64, entries: Vec<Entry>) {
+    /// 参数: model 向量所属模型(与索引当前模型不一致则忽略);item_id 记录 id;
+    /// kb_id 记录所属知识库;entries 新向量
+    pub fn replace_item_in(&self, model: &str, item_id: i64, kb_id: i64, entries: Vec<Entry>) {
         let mut g = self.inner.write().unwrap();
         if g.model != model {
             return;
         }
-        match Block::from_entries(entries) {
+        match Block::from_entries(kb_id, entries) {
             Some(b) => {
                 g.items.insert(item_id, b);
             }
             None => {
                 g.items.remove(&item_id);
+            }
+        }
+    }
+
+    /// 替换某条记录的全部向量(归属默认知识库,仅测试使用)
+    #[cfg(test)]
+    pub fn replace_item(&self, model: &str, item_id: i64, entries: Vec<Entry>) {
+        self.replace_item_in(model, item_id, crate::db::DEFAULT_KB_ID, entries);
+    }
+
+    /// 修改一批记录所属的知识库(转移记录时调用,不需要重新嵌入)
+    pub fn set_items_kb(&self, item_ids: &[i64], kb_id: i64) {
+        let mut g = self.inner.write().unwrap();
+        for id in item_ids {
+            if let Some(b) = g.items.get_mut(id) {
+                b.kb_id = kb_id;
             }
         }
     }
@@ -271,22 +301,37 @@ impl VectorIndex {
         self.len() == 0
     }
 
-    /// 余弦检索
+    /// 余弦检索(全部知识库)
     ///
     /// 参数: query 查询向量(会在内部归一化副本);k 返回条数
     /// 返回: 按相似度降序的命中;维度不一致的向量被跳过
     pub fn search(&self, query: &[f32], k: usize) -> Vec<VecHit> {
+        self.search_in(query, k, None)
+    }
+
+    /// 余弦检索,可限定知识库范围
+    ///
+    /// 参数: query 查询向量;k 返回条数;kb_filter 限定的知识库(None 或空 = 不限制)
+    /// 返回: 按相似度降序的命中;范围外的记录直接跳过,不参与排序
+    pub fn search_in(&self, query: &[f32], k: usize, kb_filter: Option<&[i64]>) -> Vec<VecHit> {
+        let kb_filter = kb_filter.filter(|f| !f.is_empty());
         if !is_valid(query) || k == 0 {
             return vec![];
         }
         let mut q = query.to_vec();
         normalize(&mut q);
         let g = self.inner.read().unwrap();
-        let total: usize = g.items.values().map(|b| b.chunk_ids.len()).sum();
+        let in_scope = |b: &Block| kb_filter.is_none_or(|f| f.contains(&b.kb_id));
+        let total: usize = g
+            .items
+            .values()
+            .filter(|b| in_scope(b))
+            .map(|b| b.chunk_ids.len())
+            .sum();
 
         let heap = if total >= PARALLEL_THRESHOLD {
             // 并行:每个线程维护本地小顶堆,最后合并
-            let blocks: Vec<(&i64, &Block)> = g.items.iter().collect();
+            let blocks: Vec<(&i64, &Block)> = g.items.iter().filter(|(_, b)| in_scope(b)).collect();
             blocks
                 .par_iter()
                 .fold(BinaryHeap::new, |mut h, (id, b)| {
@@ -301,7 +346,7 @@ impl VectorIndex {
                 })
         } else {
             let mut h = BinaryHeap::new();
-            for (id, b) in g.items.iter() {
+            for (id, b) in g.items.iter().filter(|(_, b)| in_scope(b)) {
                 scan_block(&mut h, *id, b, &q, k);
             }
             h
@@ -535,5 +580,66 @@ mod tests {
         let idx = VectorIndex::new();
         assert!(idx.search(&[f32::NAN, 1.0], 3).is_empty());
         assert!(idx.search(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn 知识库范围过滤只返回范围内命中() {
+        let idx = VectorIndex::new();
+        idx.reset("m");
+        // 记录 1 在库 1,记录 2 在库 2;向量方向相同
+        idx.replace_item_in(
+            "m",
+            1,
+            1,
+            vec![Entry {
+                chunk_id: 10,
+                vec: unit(&[1.0, 0.0]),
+            }],
+        );
+        idx.replace_item_in(
+            "m",
+            2,
+            2,
+            vec![Entry {
+                chunk_id: 20,
+                vec: unit(&[1.0, 0.0]),
+            }],
+        );
+        let ids = |h: Vec<VecHit>| -> Vec<i64> {
+            let mut v: Vec<i64> = h.iter().map(|x| x.item_id).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids(idx.search_in(&[1.0, 0.0], 5, Some(&[1]))), vec![1]);
+        assert_eq!(ids(idx.search_in(&[1.0, 0.0], 5, Some(&[2]))), vec![2]);
+        assert_eq!(
+            ids(idx.search_in(&[1.0, 0.0], 5, Some(&[1, 2]))),
+            vec![1, 2]
+        );
+        // 不限制或空范围 = 全部
+        assert_eq!(ids(idx.search_in(&[1.0, 0.0], 5, None)), vec![1, 2]);
+        assert_eq!(ids(idx.search_in(&[1.0, 0.0], 5, Some(&[]))), vec![1, 2]);
+        // 范围内没有任何记录
+        assert!(idx.search_in(&[1.0, 0.0], 5, Some(&[99])).is_empty());
+    }
+
+    #[test]
+    fn 转移知识库只改归属不丢向量() {
+        let idx = VectorIndex::new();
+        idx.reset("m");
+        idx.replace_item_in(
+            "m",
+            1,
+            1,
+            vec![Entry {
+                chunk_id: 10,
+                vec: unit(&[1.0, 0.0]),
+            }],
+        );
+        assert!(idx.search_in(&[1.0, 0.0], 5, Some(&[2])).is_empty());
+        idx.set_items_kb(&[1], 2);
+        assert_eq!(idx.search_in(&[1.0, 0.0], 5, Some(&[2])).len(), 1);
+        assert!(idx.search_in(&[1.0, 0.0], 5, Some(&[1])).is_empty());
+        assert_eq!(idx.len(), 1);
     }
 }

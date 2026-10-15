@@ -338,6 +338,38 @@ pub fn update_settings(app: AppHandle, core: S<'_>, settings: Settings) -> Resul
     Ok(())
 }
 
+/// 知识库列表
+#[tauri::command]
+pub fn list_kbs(core: S<'_>) -> Result<Vec<repo::KbView>> {
+    crate::kb::list(&core)
+}
+
+/// 新建知识库
+#[tauri::command]
+pub fn create_kb(core: S<'_>, name: String, description: Option<String>) -> Result<repo::KbView> {
+    crate::kb::create(&core, &name, description.as_deref().unwrap_or(""))
+}
+
+/// 重命名知识库
+#[tauri::command]
+pub fn rename_kb(core: S<'_>, id: i64, name: String, description: Option<String>) -> Result<()> {
+    crate::kb::rename(&core, id, &name, description.as_deref())
+}
+
+/// 删除知识库(mode:moveToDefault 转移到默认库 / cascade 连同记录删除)
+#[tauri::command]
+pub async fn delete_kb(core: S<'_>, id: i64, mode: crate::kb::DeleteMode) -> Result<usize> {
+    let core = core.inner().clone();
+    crate::kb::delete(&core, id, mode).await
+}
+
+/// 把记录转移到另一个知识库
+#[tauri::command]
+pub fn move_items(core: S<'_>, ids: Vec<i64>, kb_id: i64) -> Result<crate::kb::MoveResult> {
+    let core = core.inner().clone();
+    crate::kb::move_items(&core, &ids, kb_id)
+}
+
 /// 闪念提交(文字/图片/文档)
 #[tauri::command]
 pub async fn capture_submit(core: S<'_>, input: CaptureInput) -> Result<CaptureResult> {
@@ -427,12 +459,20 @@ pub async fn chat_ask(
     session_id: Option<i64>,
     question: String,
     model_ref: Option<String>,
+    kb_ids: Option<Vec<i64>>,
     on_event: Channel<ChatEvent>,
 ) -> Result<()> {
     let core = core.inner().clone();
-    chat::ask(&core, session_id, &question, model_ref.as_deref(), &|ev| {
-        let _ = on_event.send(ev);
-    })
+    chat::ask_in(
+        &core,
+        session_id,
+        &question,
+        model_ref.as_deref(),
+        kb_ids.as_deref(),
+        &|ev| {
+            let _ = on_event.send(ev);
+        },
+    )
     .await
 }
 

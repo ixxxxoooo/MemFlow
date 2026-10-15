@@ -26,6 +26,8 @@ pub struct Hit {
     pub chunk_id: i64,
     pub item_id: i64,
     pub kind: String,
+    /// 所属知识库
+    pub kb_id: i64,
     pub title: Option<String>,
     pub text: String,
     pub heading: Option<String>,
@@ -49,6 +51,15 @@ pub struct SearchOptions {
     pub top_n: usize,
     /// 向量相关性阈值
     pub threshold: f32,
+    /// 限定的知识库范围(None 或空 = 搜索全部);向量与全文两路都会硬过滤
+    pub kb_ids: Option<Vec<i64>>,
+}
+
+impl SearchOptions {
+    /// 规整后的知识库范围:空列表视为不限制
+    fn kb_scope(&self) -> Option<&[i64]> {
+        self.kb_ids.as_deref().filter(|v| !v.is_empty())
+    }
 }
 
 /// 时间衰减系数:越新的记录类内容略微加权(最多 +20%),文档不衰减
@@ -78,13 +89,30 @@ pub fn rrf_fuse(lists: &[Vec<i64>]) -> HashMap<i64, f32> {
 }
 
 /// 全文检索:返回按 BM25 排序的切片 id
-fn fts_search(core: &Core, terms: &[String]) -> Vec<i64> {
+fn fts_search(core: &Core, terms: &[String], kb_scope: Option<&[i64]>) -> Vec<i64> {
     let Some(expr) = tokenizer::fts_match_expr(terms) else {
         return vec![];
     };
     let r = core.db.with_read(|c| {
-        let mut stmt = c.prepare_cached("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2")?;
-        let rows = stmt.query_map(rusqlite::params![expr, RECALL_N as i64], |r| r.get::<_, i64>(0))?;
+        let (sql, mut args): (String, Vec<rusqlite::types::Value>) = match kb_scope {
+            // 限定知识库:联表 items 做硬过滤
+            Some(kbs) => (
+                format!(
+                    "SELECT f.rowid FROM chunks_fts f JOIN chunks ch ON ch.id = f.rowid JOIN items i ON i.id = ch.item_id \
+                     WHERE chunks_fts MATCH ?1 AND i.kb_id IN ({}) ORDER BY bm25(chunks_fts) LIMIT ?",
+                    vec!["?"; kbs.len()].join(",")
+                ),
+                kbs.iter().map(|k| (*k).into()).collect(),
+            ),
+            None => (
+                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?".into(),
+                Vec::new(),
+            ),
+        };
+        args.insert(0, expr.clone().into());
+        args.push((RECALL_N as i64).into());
+        let mut stmt = c.prepare_cached(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args), |r| r.get::<_, i64>(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     });
     match r {
@@ -104,7 +132,7 @@ fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
     let placeholders = vec!["?"; ids.len()].join(",");
     let sql = format!(
         "SELECT c.id, c.item_id, i.kind, COALESCE(i.title, i.original_name), c.text, c.heading, c.doc_summary, \
-         m.summary, m.tags, i.created_at, i.attachment_path, c.page \
+         m.summary, m.tags, i.created_at, i.attachment_path, c.page, i.kb_id \
          FROM chunks c JOIN items i ON i.id = c.item_id LEFT JOIN item_meta m ON m.item_id = i.id \
          WHERE c.id IN ({placeholders})"
     );
@@ -117,6 +145,7 @@ fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
                 chunk_id: r.get(0)?,
                 item_id: r.get(1)?,
                 kind: r.get(2)?,
+                kb_id: r.get(12)?,
                 title: r.get(3)?,
                 text: r.get(4)?,
                 heading: heading.filter(|h| !h.is_empty()),
@@ -269,13 +298,13 @@ pub async fn hybrid_search_with_stage(
         },
     };
     if let Some(v) = qvec {
-        vec_hits = core.vindex.search(&v, RECALL_N);
+        vec_hits = core.vindex.search_in(&v, RECALL_N, opts.kb_scope());
     }
     let vec_scores: HashMap<i64, f32> = vec_hits.iter().map(|h| (h.chunk_id, h.score)).collect();
 
     // 全文路
     let terms = tokenizer::query_terms(query);
-    let fts_ids = fts_search(core, &terms);
+    let fts_ids = fts_search(core, &terms, opts.kb_scope());
 
     // 融合
     let vec_ids: Vec<i64> = vec_hits.iter().map(|h| h.chunk_id).collect();
