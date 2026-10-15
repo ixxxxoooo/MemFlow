@@ -95,7 +95,12 @@ static char *mf_ocr_cgimage_json(CGImageRef img) {
     VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
     req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
     req.usesLanguageCorrection = YES;
-    if (@available(macOS 13.0, *)) {
+    // 不使用 @available:它会引用 ___isPlatformVersionAtLeast(compiler-rt),Rust 以 cc 链接时
+    // 在 x86_64 上找不到该符号;改用运行时系统版本判断
+    NSOperatingSystemVersion v13 = {13, 0, 0};
+    if ([NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:v13]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
         req.revision = VNRecognizeTextRequestRevision3;
         // 优先中文与英文;只保留当前系统支持的语言,避免设置不支持的语言导致失败
         NSArray<NSString *> *want = @[ @"zh-Hans", @"zh-Hant", @"en-US" ];
@@ -106,6 +111,7 @@ static char *mf_ocr_cgimage_json(CGImageRef img) {
             for (NSString *l in want) if ([sup containsObject:l]) [use addObject:l];
             if (use.count > 0) req.recognitionLanguages = use;
         }
+#pragma clang diagnostic pop
     }
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:img options:@{}];
     NSError *err = nil;
