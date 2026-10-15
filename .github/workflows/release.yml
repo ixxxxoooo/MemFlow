@@ -161,7 +161,7 @@ jobs:
       # Windows 代码签名同理(需要证书),未配置时安装包不签名。
       - name: 构建并上传 (tag)
         if: github.ref_type == 'tag'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -171,7 +171,7 @@ jobs:
 
       - name: 构建 (手动触发,仅产出构建物)
         if: github.ref_type != 'tag'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
