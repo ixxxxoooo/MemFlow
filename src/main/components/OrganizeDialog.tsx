@@ -295,7 +295,7 @@ function SuggestView({ onClose, onPick }: { onClose: () => void; onPick: (ids: n
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <Shell title="整理碎片" sub="按语义相似度找出最近两周内可以合并的零散记录" onClose={onClose} busy={false}
+    <Shell title="整理碎片" sub="按语义相似度找出 30 天内可以合并的零散记录" onClose={onClose} busy={false}
       footer={<button className="btn btn-ghost" onClick={() => void load()}><RefreshIcon size={13} />重新查找</button>}
     >
       {error && <ErrorBox text={error} onRetry={() => void load()} />}
