@@ -152,7 +152,7 @@ export function SettingsView() {
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">文本模型来源</h3>
             <div className="rounded-2xl border border-[var(--line)] px-5">
-              <Row label="问答 / 打标签 / 流程图使用" hint="本地 Ollama 完全离线;云端 API 响应更快、效果更强,但提问与资料片段会发给服务商。向量化始终在本机完成。">
+              <Row label="问答 / 打标签 / 流程图使用" hint="本地 Ollama 完全离线;云端 API 响应更快、效果更强,但提问与资料片段会发给服务商。向量与视觉模型可在下方「向量与视觉模型」单独选择本地或云端。">
                 <div className="seg" role="group" aria-label="文本模型来源">
                   <button aria-pressed={!cloud} onClick={() => void chooseProvider("ollama")}>本地 Ollama</button>
                   <button aria-pressed={cloud} onClick={() => void chooseProvider("openai_compat")}>云端 API</button>
@@ -210,7 +210,7 @@ export function SettingsView() {
               <ModelSourceRows kind="embed" form={form} set={set} keyedProfiles={status.keyedProfiles} pendingDefaultKey={keyInput}>
                 <Row label="向量模型" hint={embedChanged ? "更换后旧向量不再参与检索,需全库重刷。" : "负责把文字转为向量,如 bge-m3、nomic-embed-text。"}><input className={inputCls} value={form.embedModel} onChange={(e) => set("embedModel", e.target.value)} /></Row>
               </ModelSourceRows>
-              <Row label="启用视觉解析" hint="图片自动 OCR + 描述 + 标签。需要先下载视觉模型,开启后可对旧图片重刷补齐。">
+              <Row label="启用视觉解析" hint="图片自动 OCR + 描述 + 标签。本地来源需先下载视觉模型,云端来源需配置 API Key;开启后可对旧图片重刷补齐。">
                 <input type="checkbox" className="switch" checked={form.visionEnabled} onChange={(e) => set("visionEnabled", e.target.checked)} />
               </Row>
               <ModelSourceRows kind="vision" form={form} set={set} keyedProfiles={status.keyedProfiles} pendingDefaultKey={keyInput}>

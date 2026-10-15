@@ -82,7 +82,7 @@ function Inner({ onClose, toast, onSaved }: { onClose: () => void; toast: (t: st
         {error && <div className="mt-2 pl-8 text-xs text-[var(--err)]">{error}</div>}
         <div className="mt-3 flex items-center gap-2 pl-8">
           <button className="btn btn-ghost btn-sm" title={`支持 ${FORMATS_SUMMARY}`} onClick={() => void pick()} disabled={busy}><UploadIcon size={13} />添加文件</button>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--fg-faint)]">存入「{kbName}」· Enter 保存 · Shift+Enter 换行 · Esc 关闭</span>
+          <span className="min-w-0 flex-1 text-[11px] leading-snug text-[var(--fg-faint)]">存入「{kbName}」· Enter 保存 · Shift+Enter 换行 · Esc 关闭</span>
           <button className="btn btn-secondary" onClick={onClose} disabled={busy}>取消</button>
           <button className="btn btn-primary" onClick={() => void save()} disabled={!canSave}>{busy ? "保存中…" : "保存"}</button>
         </div>
