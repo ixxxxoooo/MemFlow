@@ -6,6 +6,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { skipDetailLine, summarizeCapture } from "../lib/importSummary";
+import { FORMATS_SUMMARY } from "../lib/formats";
+import { dropTargetKb } from "../lib/kbScope";
 import { useKb } from "../lib/kbStore";
 import { useApp } from "../lib/store";
 import type { QueueStatus } from "../lib/types";
@@ -25,6 +27,10 @@ export function App() {
   const { view, drawer, refreshStatus, setQueue, bumpData, itemsDeleted, toast, closeDrawer, closeDocModal } = useApp();
   const [dragging, setDragging] = useState(false);
   const loadKbs = useKb((s) => s.load);
+  // 拖拽遮罩里提示本次会导入到哪个知识库
+  const kbs = useKb((s) => s.kbs);
+  const docsKb = useApp((s) => s.docsKb);
+  const dropName = kbs.find((k) => k.id === dropTargetKb(docsKb, view === "docs", kbs))?.name ?? "默认知识库";
 
   // 订阅后端事件;Ollama 状态变化由后端推送,定时轮询只作兜底(30 秒)
   useEffect(() => {
@@ -61,10 +67,11 @@ export function App() {
       else if (t === "drop") {
         setDragging(false);
         try {
-          const kb = useKb.getState();
-          const target = kb.importTarget();
-          kb.rememberImport(target);
-          const targetName = kb.kbs.find((k) => k.id === target)?.name ?? "默认知识库";
+          // 正在档案库里查看某个库 → 导入该库;其余情况一律导入默认库
+          const { kbs } = useKb.getState();
+          const app = useApp.getState();
+          const target = dropTargetKb(app.docsKb, app.view === "docs", kbs);
+          const targetName = kbs.find((k) => k.id === target)?.name ?? "默认知识库";
           const r = await api.captureSubmit(null, e.payload.paths, target);
           const sum = summarizeCapture(r, targetName);
           toast(`${sum.text}${r.created.length ? ",后台解析中" : ""}${sum.detail.length ? `(跳过:${skipDetailLine(sum.detail)})` : ""}`, sum.kind);
@@ -95,7 +102,10 @@ export function App() {
         </div>
         {dragging && (
           <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--accent)] bg-[var(--accent-soft)] backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-sm font-medium text-[var(--accent)]"><UploadIcon size={18} />松手即可导入图片 / 文档 / 文件夹</div>
+            <div className="flex flex-col items-center gap-1.5 text-sm font-medium text-[var(--accent)]">
+              <span className="flex items-center gap-2"><UploadIcon size={18} />松手即可导入到「{dropName}」</span>
+              <span className="text-xs font-normal opacity-80">支持 {FORMATS_SUMMARY},也可拖入整个文件夹</span>
+            </div>
           </div>
         )}
       </main>

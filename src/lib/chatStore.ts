@@ -58,6 +58,18 @@ interface ChatState {
   stop: () => Promise<void>;
 }
 
+const SCOPE_KEY = "memflow.chatScope";
+
+/** 读取上次选择的提问范围(新对话沿用,重启后也保留) */
+function readScope(): number[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SCOPE_KEY) ?? "[]") as unknown;
+    return Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : [];
+  } catch {
+    return [];
+  }
+}
+
 let keySeq = 1;
 const nextKey = () => `m${keySeq++}`;
 
@@ -68,9 +80,12 @@ export const useChat = create<ChatState>((set, get) => ({
   busy: false,
   modelRef: null,
   models: [],
-  kbIds: [],
+  kbIds: readScope(),
 
-  setKbIds: (kbIds) => set({ kbIds }),
+  setKbIds: (kbIds) => {
+    try { localStorage.setItem(SCOPE_KEY, JSON.stringify(kbIds)); } catch { /* 存储不可用时只在本次运行内生效 */ }
+    set({ kbIds });
+  },
 
   loadModels: async () => {
     try {

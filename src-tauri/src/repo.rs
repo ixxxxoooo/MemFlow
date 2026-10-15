@@ -79,6 +79,9 @@ pub struct ItemFilter {
     pub limit: Option<i64>,
     /// 限定知识库(空 = 全部)
     pub kb_id: Option<i64>,
+    /// 视图语义:`timeline` 只含随手记录(排除文档内嵌图与文件夹导入的图片);
+    /// `library` 为库内资料(文档 + 文件夹导入的独立图片,排除内嵌图)
+    pub view: Option<String>,
 }
 
 /// 新建记录参数
@@ -175,6 +178,10 @@ pub struct KbView {
     pub created_at: i64,
     /// 库内记录数
     pub item_count: i64,
+    /// 库内文档数(kind=document)
+    pub document_count: i64,
+    /// 库内切片数
+    pub chunk_count: i64,
 }
 
 /// 对话消息
@@ -344,6 +351,15 @@ pub fn list_items(c: &Connection, f: &ItemFilter) -> Result<Vec<ItemView>> {
     if let Some(kb) = f.kb_id {
         sql.push_str(" AND i.kb_id = ?");
         args.push(kb.into());
+    }
+    match f.view.as_deref() {
+        Some("timeline") => sql.push_str(
+            " AND i.embedded = 0 AND i.kind IN ('note','image') AND (i.kind = 'note' OR i.source_path IS NULL)",
+        ),
+        Some("library") => sql.push_str(
+            " AND i.embedded = 0 AND (i.kind = 'document' OR (i.kind = 'image' AND i.source_path IS NOT NULL))",
+        ),
+        _ => {}
     }
     if let Some(b) = f.before_id {
         sql.push_str(" AND i.id < ?");
@@ -796,7 +812,9 @@ fn kb_name_conflict(e: rusqlite::Error, name: &str) -> AppError {
 pub fn list_kbs(c: &Connection) -> Result<Vec<KbView>> {
     let mut stmt = c.prepare(
         "SELECT k.id, k.name, k.description, k.created_at, \
-         (SELECT count(*) FROM items i WHERE i.kb_id = k.id) \
+         (SELECT count(*) FROM items i WHERE i.kb_id = k.id), \
+         (SELECT count(*) FROM items i WHERE i.kb_id = k.id AND i.kind = 'document'), \
+         (SELECT count(*) FROM chunks ch JOIN items i ON i.id = ch.item_id WHERE i.kb_id = k.id) \
          FROM knowledge_bases k ORDER BY k.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -806,6 +824,8 @@ pub fn list_kbs(c: &Connection) -> Result<Vec<KbView>> {
             description: r.get(2)?,
             created_at: r.get(3)?,
             item_count: r.get(4)?,
+            document_count: r.get(5)?,
+            chunk_count: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)

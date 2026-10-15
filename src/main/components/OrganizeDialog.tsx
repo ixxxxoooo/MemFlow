@@ -284,7 +284,7 @@ function MergeView({ ids, onClose, onBack }: { ids: number[]; onClose: () => voi
 
 /** 碎片建议列表:按向量相似度聚好的组,点击后进入归并预览 */
 function SuggestView({ onClose, onPick }: { onClose: () => void; onPick: (ids: number[]) => void }) {
-  const kbId = useKb((s) => s.current);
+  const kbId = useKb((s) => s.timelineKb);
   const [groups, setGroups] = useState<GroupSuggestion[] | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {

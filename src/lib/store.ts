@@ -28,6 +28,9 @@ interface AppState {
   pullHint: string | null;
   /** 数据变化计数,列表视图据此刷新 */
   dataVersion: number;
+  /** 档案库里当前打开的知识库;null 表示在知识库列表页 */
+  docsKb: number | null;
+  setDocsKb: (id: number | null) => void;
   setView: (v: View) => void;
   setQueue: (q: QueueStatus) => void;
   refreshStatus: () => Promise<void>;
@@ -56,6 +59,8 @@ export const useApp = create<AppState>((set, get) => ({
   pull: null,
   pullHint: null,
   dataVersion: 0,
+  docsKb: null,
+  setDocsKb: (docsKb) => set({ docsKb }),
   setView: (view) => set({ view }),
   setQueue: (queue) => set({ queue }),
   refreshStatus: async () => {

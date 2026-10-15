@@ -42,3 +42,8 @@ export const ChevronDownIcon = (p: P) => <I {...p}><path d="m6 9 6 6 6-6" /></I>
 export const FolderIcon = (p: P) => <I {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></I>;
 export const MoveIcon = (p: P) => <I {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2M3 7v10a2 2 0 0 0 2 2h8M16 15h6m0 0-3-3m3 3-3 3" /></I>;
 export const AtIcon = (p: P) => <I {...p}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></I>;
+export const InfoIcon = (p: P) => <I {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></I>;
+export const ChevronLeftIcon = (p: P) => <I {...p}><path d="m15 6-6 6 6 6" /></I>;
+export const ChevronRightIcon = (p: P) => <I {...p}><path d="m9 6 6 6-6 6" /></I>;
+export const EyeIcon = (p: P) => <I {...p}><path d="M2 12s3.500-7 10-7 10 7 10 7-3.500 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></I>;
+export const EyeOffIcon = (p: P) => <I {...p}><path d="M3 3l18 18M10.600 6.100A10 10 0 0 1 12 5c6.500 0 10 7 10 7a17 17 0 0 1-3.200 4.200M6.600 6.600C3.800 8.400 2 12 2 12s3.500 7 10 7a9.500 9.500 0 0 0 4.200-1M9.900 9.900a3 3 0 0 0 4.200 4.200" /></I>;

@@ -12,6 +12,10 @@ export interface Kb {
   createdAt: number;
   /** 库内记录数 */
   itemCount: number;
+  /** 库内文档数 */
+  documentCount: number;
+  /** 库内切片数 */
+  chunkCount: number;
 }
 
 /** 转移记录的结果 */
@@ -165,6 +169,8 @@ export interface ItemFilter {
   limit?: number;
   /** 限定知识库(省略 = 全部) */
   kbId?: number;
+  /** 视图语义:timeline 只含随手记录;library 为库内资料(文档与文件夹导入的图片) */
+  view?: "timeline" | "library";
 }
 
 export interface Settings {

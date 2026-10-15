@@ -3,7 +3,6 @@
 
 import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
-import { KbSwitcher } from "./KbSwitcher";
 import { ChatIcon, LibraryIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
 
 const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
@@ -13,7 +12,7 @@ const NAV: { id: View; label: string; icon: typeof ChatIcon }[] = [
 ];
 
 export function Sidebar() {
-  const { view, setView, status, queue } = useApp();
+  const { view, setView, status, queue, setDocsKb } = useApp();
   const running = status?.ollamaRunning ?? false;
   // 当前问答实际使用的模型(跟随输入框旁的切换)
   const { modelRef, models } = useChat();
@@ -54,12 +53,15 @@ export function Sidebar() {
         <SparkleIcon size={16} className="text-[var(--accent)]" />
         <span className="text-[15px] font-semibold tracking-tight">MemFlow</span>
       </div>
-      <KbSwitcher />
       <nav className="flex flex-col gap-0.5 px-2.5">
         {NAV.map((n) => (
           <button
             key={n.id}
-            onClick={() => setView(n.id)}
+            onClick={() => {
+              // 再次点击「知识档案库」回到知识库列表
+              if (n.id === "docs" && view === "docs") setDocsKb(null);
+              setView(n.id);
+            }}
             className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors ${
               view === n.id ? "bg-[var(--accent-soft)] font-medium text-[var(--accent)]" : "text-[var(--fg)] hover:bg-black/5 dark:hover:bg-white/5"
             }`}

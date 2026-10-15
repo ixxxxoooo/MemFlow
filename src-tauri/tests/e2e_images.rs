@@ -367,3 +367,84 @@ async fn 图片单独导入时本机ocr让文字可被搜索() {
         "图片应被检索命中"
     );
 }
+
+#[tokio::test]
+async fn 文件夹导入的图片与内嵌图不进时间流_库内视图含文档与文件夹图片() {
+    use_worker();
+    let (url, _m) = start_mock().await;
+    let (core, dir) = new_core(&url);
+    // 文件夹:一篇 md + 一张被引用的图
+    let root = dir.path().join("手册");
+    copy_fixture("ocr_budget.png", &root.join("img/budget.png"));
+    write(
+        &root.join("指南.md"),
+        "# 指南\n\n![预算](img/budget.png)\n".as_bytes(),
+    );
+    // 单文件 md 引用的图:作为"内嵌图"自动导入
+    let solo = dir.path().join("单篇");
+    copy_fixture("ocr_route.png", &solo.join("route.png"));
+    write(
+        &solo.join("路线.md"),
+        "# 路线\n\n![路线](route.png)\n".as_bytes(),
+    );
+    let r = import(&core, &[&root], None).await;
+    let r2 = import(&core, &[&solo.join("路线.md")], None).await;
+    assert!(r.errors.is_empty() && r2.errors.is_empty(), "{r:?} {r2:?}");
+    queue::drain_once(&core).await.unwrap();
+    // 再来一条随手记录和一张拖入的图片(无来源路径)
+    let note = ingest::capture(
+        &core,
+        CaptureInput {
+            text: Some("随手记一条".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let loose = dir.path().join("拖入.png");
+    // 同内容图片在默认库已存在 → 换一张不同内容的
+    copy_fixture("ocr_route.png", &loose);
+    let _ = import(
+        &core,
+        &[&loose],
+        Some(core.db.with(|c| repo::create_kb(c, "另一库", "")).unwrap()),
+    )
+    .await;
+    queue::drain_once(&core).await.unwrap();
+
+    let list = |view: &str| -> Vec<repo::ItemView> {
+        core.db
+            .with(|c| {
+                repo::list_items(
+                    c,
+                    &repo::ItemFilter {
+                        view: Some(view.into()),
+                        limit: Some(200),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap()
+    };
+    let timeline = list("timeline");
+    // 时间流:只有随手记录与无来源路径的独立图片
+    assert!(timeline.iter().any(|i| note.created.contains(&i.id)));
+    assert!(timeline.iter().all(|i| !i.embedded), "{timeline:?}");
+    assert!(
+        timeline
+            .iter()
+            .all(|i| i.kind == "note" || i.source_path.is_none()),
+        "{timeline:?}"
+    );
+    assert!(timeline.iter().all(|i| i.kind != "document"));
+    // 库内视图:文档在、内嵌图不在
+    let library = list("library");
+    assert!(library.iter().any(|i| i.kind == "document"));
+    assert!(library.iter().all(|i| !i.embedded && i.kind != "note"));
+    // 知识库计数:默认库有 2 篇文档和若干切片
+    let kbs = core.db.with(repo::list_kbs).unwrap();
+    let def = kbs.iter().find(|k| k.id == DEFAULT_KB_ID).unwrap();
+    assert_eq!(def.document_count, 2, "{def:?}");
+    assert!(def.chunk_count > 0, "{def:?}");
+    assert!(def.item_count >= def.document_count);
+}

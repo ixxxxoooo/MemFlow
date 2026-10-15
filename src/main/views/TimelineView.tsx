@@ -25,7 +25,7 @@ export function TimelineView() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
-  const current = useKb((s) => s.current);
+  const { kbs, timelineKb: current, setTimelineKb } = useKb();
   const [moreOpen, setMoreOpen] = useState(false);
   const [tagQuery, setTagQuery] = useState("");
   // 多选(用于 AI 归并)与"可整理"提示
@@ -45,7 +45,7 @@ export function TimelineView() {
     const my = ++seq.current;
     setLoading(true);
     try {
-      const rows = await api.listItems({ kind, tag: tag ?? undefined, search: debounced || undefined, beforeId: before, limit: PAGE, kbId: current ?? undefined });
+      const rows = await api.listItems({ kind, tag: tag ?? undefined, search: debounced || undefined, beforeId: before, limit: PAGE, kbId: current ?? undefined, view: "timeline" });
       if (my !== seq.current) return;
       setItems((prev) => (append ? [...prev, ...rows] : rows));
       setHasMore(rows.length === PAGE);
@@ -110,6 +110,18 @@ export function TimelineView() {
         <button className={chip(kind === "note,image")} onClick={() => setKind("note,image")}>全部</button>
         <button className={chip(kind === "note")} onClick={() => setKind("note")}>文字</button>
         <button className={chip(kind === "image")} onClick={() => setKind("image")}>图片</button>
+        {kbs.length > 1 && (
+          <select
+            aria-label="按知识库筛选"
+            title="只看某个知识库的记录"
+            className="select h-[26px] max-w-[150px] py-0 text-xs"
+            value={current ?? ""}
+            onChange={(e) => setTimelineKb(e.target.value === "" ? null : Number(e.target.value))}
+          >
+            <option value="">全部知识库</option>
+            {kbs.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+          </select>
+        )}
         <span className="mx-1 h-4 w-px bg-[var(--line)]" />
         {tag && (
           <button className="flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-xs text-[var(--on-accent)]" onClick={() => setTag(null)}>#{tag}<CloseIcon size={11} /></button>
