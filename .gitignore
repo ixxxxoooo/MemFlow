@@ -9,3 +9,7 @@ src-tauri/gen/schemas
 release-notes.md
 .env
 .env.*
+
+# 全局 gitignore 中的 main 规则会误伤前端主窗口目录,这里显式取消忽略
+!src/main/
+!src/main/**

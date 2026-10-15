@@ -58,6 +58,38 @@
      ```
 3. 按 `Cmd+Shift+K` 记下第一条想法,然后到「AI 问答」里提问。
 
+### 圈x(Quantumult X)用户:让 Ollama 域名不走 fake-ip
+
+**现象**:`ollama pull` 报 `redirect target not allowed`,或下载一直失败。
+
+**原因**:Ollama 的模型文件先请求 `registry.ollama.ai`,再 307 跳转到 `*.r2.cloudflarestorage.com` 的 CDN。圈x 开启 fake-ip 后,这些域名会被解析成 `198.18.0.0/15` 的假地址,Ollama 判定为不安全的跳转目标而拒绝。
+
+**配置**:在圈x 的配置文件里找到 `[general]`,加入(已有 `dns_exclusion_list` 时,把下面的域名用逗号追加进去,不要写两行):
+
+```ini
+[general]
+dns_exclusion_list = *.ollama.ai, ollama.ai, *.ollama.com, ollama.com, *.r2.cloudflarestorage.com
+```
+
+保存后在圈x 里重新加载配置(或重启圈x)。该项的含义是「这些域名不使用 fake-ip,走真实 DNS」,是否走代理仍由你的分流规则决定,可按需再补规则,例如:
+
+```ini
+[filter_local]
+host-suffix, ollama.ai, proxy
+host-suffix, r2.cloudflarestorage.com, proxy
+```
+
+(`proxy` 换成你自己的策略组名;若直连网络就能访问,写 `direct`。)
+
+**验证**:
+
+```bash
+nslookup registry.ollama.ai          # 返回的 IP 不应在 198.18.x.x 范围
+curl -I https://registry.ollama.ai/v2/   # 能返回 HTTP 状态码即连通
+```
+
+**兜底**:不想改圈x 配置时,在 MemFlow「设置 → 模型状态与下载」使用「直连下载」,它由应用自己下载并校验模型文件,不依赖上面的配置。
+
 ### 使用云端模型(可选)
 
 在「设置 → 文本模型来源」选择「云端 API」,挑选服务商预设(如 DeepSeek),填入 API Key,点「测试连接」后保存即可。
@@ -89,6 +121,8 @@ Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后�
 - 存储:SQLite(WAL)+ FTS5 + 内存余弦向量索引(按嵌入模型隔离),数据位于 `~/Library/Application Support/MemFlow/`。
 - 队列:持久化任务、崩溃恢复、指数退避;Ollama 离线或模型缺失仅重排不耗次数。
 - 问答:无命中拒答 → 带编号资料 → 流式生成 → 引用校验(剔除非法 `[n]`)→ 会话落库。
+
+数据位置、与 RAGFlow 的逐环节对比、性能调优建议见 [`docs/架构与RAGFlow对比.md`](docs/架构与RAGFlow对比.md)。
 
 更多细节见 [`.specstory/history/docs/20261015_MemFlow本地AI外脑.md`](.specstory/history/docs/20261015_MemFlow本地AI外脑.md)。
 
