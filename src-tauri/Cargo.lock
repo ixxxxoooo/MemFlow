@@ -2765,6 +2765,7 @@ dependencies = [
  "base64 0.22.1",
  "cc",
  "chrono",
+ "encoding_rs",
  "fastembed",
  "futures-util",
  "hex",

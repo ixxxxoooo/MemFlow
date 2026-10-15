@@ -28,13 +28,15 @@ export function editModeOf(name: string | null | undefined): DocEditMode {
   return "none";
 }
 
+/** 提取结果为 Markdown 的格式(带标题层级与表格);txt/rtf 按原样排版 */
+const MD_EXTS = new Set(["md", "markdown", "docx", "pdf", "pptx", "xlsx", "csv", "tsv", "html", "htm", "xhtml", "epub"]);
+
 /**
- * 预览时是否按 Markdown 渲染(md、docx、pdf 的提取结果带 # 标题与 Markdown 表格;txt 按原样排版)
+ * 预览时是否按 Markdown 渲染(除 txt/rtf 外,提取结果都带 # 标题与 Markdown 表格)
  *
  * 参数: name 文件名
  * 返回: 是否按 Markdown 渲染
  */
 export function renderAsMarkdown(name: string | null | undefined): boolean {
-  const e = docExt(name);
-  return e === "md" || e === "markdown" || e === "docx" || e === "pdf";
+  return MD_EXTS.has(docExt(name));
 }

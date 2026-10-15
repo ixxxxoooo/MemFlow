@@ -10,6 +10,7 @@ pub mod db;
 pub mod error;
 pub mod extract;
 pub mod folder;
+pub mod formats;
 pub mod images;
 pub mod ingest;
 pub mod kb;

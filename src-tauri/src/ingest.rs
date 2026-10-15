@@ -7,6 +7,7 @@ use crate::core::Core;
 use crate::error::{AppError, Result};
 use crate::extract::{self, FileKind};
 use crate::folder;
+use crate::formats;
 use crate::images;
 use crate::queue;
 use crate::repo::{self, NewItem};
@@ -383,10 +384,16 @@ async fn collect_doc_images(
                 }
             }
         }
-        "docx" => {
+        "docx" | "pptx" | "epub" => {
             let p = path.to_path_buf();
+            let kind = ext.clone();
             let Ok(Ok((imgs, skipped))) =
-                tokio::task::spawn_blocking(move || images::docx_images(&p)).await
+                tokio::task::spawn_blocking(move || match kind.as_str() {
+                    "pptx" => formats::pptx_images(&p),
+                    "epub" => formats::epub_images(&p),
+                    _ => images::docx_images(&p),
+                })
+                .await
             else {
                 return links;
             };

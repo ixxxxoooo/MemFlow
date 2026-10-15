@@ -63,7 +63,7 @@ export function DocsView() {
   const importFiles = async (folder = false) => {
     const picked = folder
       ? await open({ directory: true, multiple: false })
-      : await open({ multiple: true, filters: [{ name: "文档", extensions: ["pdf", "md", "markdown", "txt", "docx"] }] });
+      : await open({ multiple: true, filters: [{ name: "文档", extensions: ["pdf", "md", "markdown", "txt", "docx", "pptx", "xlsx", "csv", "tsv", "html", "htm", "epub", "rtf"] }] });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     const target = importTarget();

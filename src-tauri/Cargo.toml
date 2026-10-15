@@ -38,6 +38,8 @@ hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 thiserror = "2"
 regex = "1"
+# 字符编码识别(csv/txt 的 GBK、UTF-16,rtf 代码页)
+encoding_rs = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"

@@ -18,5 +18,8 @@ describe("文档类型", () => {
     expect(renderAsMarkdown("a.docx")).toBe(true);
     expect(renderAsMarkdown("a.pdf")).toBe(true);
     expect(renderAsMarkdown("a.txt")).toBe(false);
+    for (const n of ["a.pptx", "a.xlsx", "a.csv", "a.html", "a.epub"]) expect(renderAsMarkdown(n)).toBe(true);
+    expect(renderAsMarkdown("a.rtf")).toBe(false);
+    expect(editModeOf("a.xlsx")).toBe("none");
   });
 });

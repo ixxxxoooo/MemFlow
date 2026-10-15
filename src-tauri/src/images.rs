@@ -55,8 +55,17 @@ fn img_regex() -> &'static Regex {
     })
 }
 
+/// 读取 HTML/XML 标签里的属性值(双引号或单引号,大小写不敏感;不会把 `data-src` 当成 `src`)
+pub fn html_attr_value(tag: &str, name: &str) -> Option<String> {
+    html_attr(tag, name)
+}
+
 fn html_attr(tag: &str, name: &str) -> Option<String> {
-    let re = Regex::new(&format!(r#"(?i)\b{name}\s*=\s*(?:"([^"]*)"|'([^']*)')"#)).ok()?;
+    let re = Regex::new(&format!(
+        r#"(?i)(?:^|[\s"'/<]){}\s*=\s*(?:"([^"]*)"|'([^']*)')"#,
+        regex::escape(name)
+    ))
+    .ok()?;
     let c = re.captures(tag)?;
     c.get(1)
         .or_else(|| c.get(2))
@@ -80,9 +89,10 @@ pub fn scan_refs(text: &str) -> Vec<ImgRef> {
         } else {
             let tag = whole.as_str();
             match html_attr(tag, "src") {
+                // 地址里的 &amp; 等实体还原后再作为锚点,与 html 转文本时的写法一致
                 Some(s) => (
                     html_attr(tag, "alt").unwrap_or_default(),
-                    s.trim().to_string(),
+                    crate::formats::decode_entities(s.trim()),
                 ),
                 None => continue,
             }
@@ -304,6 +314,40 @@ pub struct EmbeddedImage {
     pub bytes: Vec<u8>,
 }
 
+/// 把一张内嵌图片放入结果列表(过滤非位图格式、过小的装饰图与超大图)
+///
+/// 参数: anchor 正文里的引用写法(文件名取自其最后一段)
+/// 返回: false 表示已达数量上限,调用方应停止继续添加
+pub fn push_embedded(
+    out: &mut Vec<EmbeddedImage>,
+    skipped: &mut Vec<String>,
+    anchor: &str,
+    bytes: Vec<u8>,
+) -> bool {
+    let name = anchor.rsplit('/').next().unwrap_or(anchor).to_string();
+    if classify(Path::new(&name)) != FileKind::Image {
+        skipped.push("文档内嵌的矢量/不支持格式图片".to_string());
+        return true;
+    }
+    if out.len() >= MAX_IMAGES_PER_DOC {
+        skipped.push(format!("文档内嵌图片过多,仅导入前 {MAX_IMAGES_PER_DOC} 张"));
+        return false;
+    }
+    if bytes.len() < DOCX_MIN_IMAGE_BYTES {
+        return true;
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        skipped.push("文档内嵌图片超过 30MB".to_string());
+        return true;
+    }
+    out.push(EmbeddedImage {
+        anchor: anchor.to_string(),
+        name,
+        bytes,
+    });
+    true
+}
+
 /// 读取 docx 关系表:rId → Target(只保留图片关系)
 pub fn docx_rels(xml: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
@@ -360,11 +404,6 @@ pub fn docx_images(path: &Path) -> Result<(Vec<EmbeddedImage>, Vec<String>)> {
         if !seen.insert(target.clone()) {
             continue;
         }
-        let name = target.rsplit('/').next().unwrap_or(target).to_string();
-        if classify(Path::new(&name)) != FileKind::Image {
-            skipped.push("文档内嵌的矢量/不支持格式图片".to_string());
-            continue;
-        }
         if out.len() >= MAX_IMAGES_PER_DOC {
             skipped.push(format!("文档内嵌图片过多,仅导入前 {MAX_IMAGES_PER_DOC} 张"));
             break;
@@ -377,18 +416,9 @@ pub fn docx_images(path: &Path) -> Result<(Vec<EmbeddedImage>, Vec<String>)> {
         let Some(bytes) = read_entry(&mut zip, &entry, MAX_IMAGE_BYTES as u64 + 1) else {
             continue;
         };
-        if bytes.len() < DOCX_MIN_IMAGE_BYTES {
-            continue;
+        if !push_embedded(&mut out, &mut skipped, target, bytes) {
+            break;
         }
-        if bytes.len() > MAX_IMAGE_BYTES {
-            skipped.push("文档内嵌图片超过 30MB".to_string());
-            continue;
-        }
-        out.push(EmbeddedImage {
-            anchor: target.clone(),
-            name,
-            bytes,
-        });
     }
     Ok((out, skipped))
 }
