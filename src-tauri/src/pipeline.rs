@@ -7,7 +7,7 @@
 //! - 结构化提取解析失败会重试,仍失败则降级为"仅原文 + 向量"
 
 use crate::chunker::{self, ChunkOptions, ChunkPiece};
-use crate::core::{CancelToken, Core};
+use crate::core::{permit, CancelToken, Core, EMBED_CONCURRENCY};
 use crate::error::{AppError, Result};
 use crate::extract;
 use crate::ollama::OllamaClient;
@@ -15,13 +15,14 @@ use crate::prompts::{self, ExtractedMeta, VisionResult, PROMPT_VERSION};
 use crate::repo::{self, ItemView, NewChunk, NewMeta};
 use crate::tokenizer;
 use crate::vector::{self, Entry};
+use futures_util::stream::{self, StreamExt, TryStreamExt};
 use serde_json::json;
 use std::path::PathBuf;
 
 /// 非文档类记录不超过该字符数时不再分块
 const SINGLE_CHUNK_MAX: usize = 1200;
 /// 每批向量化的切片数
-const EMBED_BATCH: usize = 8;
+const EMBED_BATCH: usize = 16;
 /// 提取输入的最大字符数(过长文档采样)
 const EXTRACT_INPUT_MAX: usize = 6000;
 /// 图片大小上限
@@ -156,6 +157,13 @@ async fn extract_meta(
     is_doc: bool,
     token: &CancelToken,
 ) -> Result<Option<ExtractedMeta>> {
+    // 本地模型串行、云端模型可并发
+    let stage = if core.settings().uses_cloud_llm() {
+        &core.stages.llm_cloud
+    } else {
+        &core.stages.llm_local
+    };
+    let _permit = permit(stage).await?;
     core.prepare_text_model().await;
     let llm = core.llm();
     let text_model = core.text_model();
@@ -189,6 +197,8 @@ async fn run_vision(
     token: &CancelToken,
 ) -> Result<Option<VisionResult>> {
     let s = core.settings();
+    // 视觉模型始终在本地运行,与本地文本模型共用串行许可,避免同时占用内存
+    let _permit = permit(&core.stages.llm_local).await?;
     let installed: Vec<String> = ollama
         .list_models()
         .await?
@@ -267,7 +277,9 @@ pub async fn process_item(
         let path = abs
             .clone()
             .ok_or_else(|| AppError::Invalid("文档缺少附件".into()))?;
+        let _cpu = permit(&core.stages.cpu).await?;
         content = extract::extract_text(&path).await?;
+        drop(_cpu);
         core.db
             .with(|c| repo::update_item_text(c, item_id, None, &content))?;
     }
@@ -352,7 +364,12 @@ pub async fn process_item(
                 heading: String::new(),
             }]
         } else {
-            chunker::chunk(&index_text, ChunkOptions::default())
+            // 长文分块与分词吃 CPU,放到阻塞线程并受 CPU 许可限流
+            let _cpu = permit(&core.stages.cpu).await?;
+            let text = index_text.clone();
+            tokio::task::spawn_blocking(move || chunker::chunk(&text, ChunkOptions::default()))
+                .await
+                .map_err(|e| AppError::Other(format!("分块任务失败: {e}")))?
         };
     if pieces.is_empty() {
         return Err(AppError::Parse("没有可索引的文本".into()));
@@ -368,13 +385,23 @@ pub async fn process_item(
         .iter()
         .map(|p| build_embed_input(&item.kind, &title, &meta, p))
         .collect();
-    let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(inputs.len());
-    for batch in inputs.chunks(EMBED_BATCH) {
-        if token.is_cancelled() {
-            return Err(AppError::Cancelled);
-        }
-        vectors.extend(ollama.embed(&s.embed_model, batch, &s.keep_alive).await?);
-    }
+    // 批次并发向量化:buffered 保持结果顺序,全局信号量限制 Ollama 同时承受的请求数
+    let batches: Vec<Vec<String>> = inputs.chunks(EMBED_BATCH).map(|b| b.to_vec()).collect();
+    let embedded: Vec<Vec<Vec<f32>>> = stream::iter(batches)
+        .map(|batch| {
+            let (ollama, model, keep) = (&ollama, &s.embed_model, &s.keep_alive);
+            async move {
+                if token.is_cancelled() {
+                    return Err(AppError::Cancelled);
+                }
+                let _p = permit(&core.stages.embed).await?;
+                ollama.embed(model, &batch, keep).await
+            }
+        })
+        .buffered(EMBED_CONCURRENCY)
+        .try_collect()
+        .await?;
+    let vectors: Vec<Vec<f32>> = embedded.into_iter().flatten().collect();
     let dim = vectors.first().map(|v| v.len()).unwrap_or(0);
     if dim == 0 || vectors.iter().any(|v| v.len() != dim) {
         return Err(AppError::Ollama("向量维度不一致".into()));
@@ -390,22 +417,34 @@ pub async fn process_item(
     } else {
         None
     };
-    let new_chunks: Vec<NewChunk> = pieces
-        .iter()
-        .zip(vectors.iter())
-        .map(|(p, v)| NewChunk {
-            text: p.text.clone(),
-            heading: p.heading.clone(),
-            doc_summary: doc_summary.clone(),
-            embed_model: s.embed_model.clone(),
-            embedding: vector::encode(v),
-            dim,
-            fts_tokens: tokenizer::index_tokens(&format!(
-                "{title} {tags_text} {summary_text} {}",
-                p.text
-            )),
+    // 分词与编码向量吃 CPU:放到阻塞线程并受 CPU 许可限流
+    let (new_chunks, vectors): (Vec<NewChunk>, Vec<Vec<f32>>) = {
+        let _cpu = permit(&core.stages.cpu).await?;
+        let (pieces, embed_model, title) = (pieces.clone(), s.embed_model.clone(), title.clone());
+        let (tags_text, summary_text, doc_summary) =
+            (tags_text.clone(), summary_text.clone(), doc_summary.clone());
+        tokio::task::spawn_blocking(move || {
+            let chunks = pieces
+                .iter()
+                .zip(vectors.iter())
+                .map(|(p, v)| NewChunk {
+                    text: p.text.clone(),
+                    heading: p.heading.clone(),
+                    doc_summary: doc_summary.clone(),
+                    embed_model: embed_model.clone(),
+                    embedding: vector::encode(v),
+                    dim,
+                    fts_tokens: tokenizer::index_tokens(&format!(
+                        "{title} {tags_text} {summary_text} {}",
+                        p.text
+                    )),
+                })
+                .collect();
+            (chunks, vectors)
         })
-        .collect();
+        .await
+        .map_err(|e| AppError::Other(format!("索引构建失败: {e}")))?
+    };
     let new_meta = NewMeta {
         summary: meta
             .as_ref()

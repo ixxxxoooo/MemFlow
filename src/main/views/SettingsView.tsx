@@ -188,6 +188,7 @@ export function SettingsView() {
               <Row label="视觉模型" hint="推荐 minicpm-v(中文 OCR 强)或 qwen2.5vl。"><input className={inputCls} value={form.visionModel} onChange={(e) => set("visionModel", e.target.value)} /></Row>
               <Row label="模型常驻时长" hint="空闲多久后从内存卸载,如 5m、30s、1h、-1(常驻)。"><input className={`${inputCls} w-28`} value={form.keepAlive} onChange={(e) => set("keepAlive", e.target.value)} /></Row>
               <Row label="上下文长度" hint="所有请求保持一致,避免 Ollama 反复重载模型。内存紧张可调小。"><input type="number" className={`${inputCls} w-28`} value={form.numCtx} onChange={(e) => set("numCtx", Number(e.target.value))} /></Row>
+              <Row label="入库并发数" hint="同时处理的文档数。0 为自动(按 CPU 核数,最多 4)。向量化与本地大模型调用仍按各自上限限流,调大不会撑爆内存。"><input type="number" min={0} max={8} className={`${inputCls} w-28`} value={form.importConcurrency} onChange={(e) => set("importConcurrency", Math.max(0, Math.min(8, Number(e.target.value) || 0)))} /></Row>
               <Row label="直连下载仓库" hint="「直连下载」使用的 Ollama 模型仓库地址,网络受限时可改成可访问的镜像。"><input className={inputCls} value={form.modelRegistry} onChange={(e) => set("modelRegistry", e.target.value)} /></Row>
             </div>
 

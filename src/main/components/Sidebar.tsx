@@ -32,7 +32,9 @@ export function Sidebar() {
   let queueText: string | null = null;
   if (queue) {
     const waiting = queue.pending + queue.running;
-    if (queue.currentItem) {
+    if (queue.running > 1) {
+      queueText = `正在并行解析 ${queue.running} 项${queue.pending > 0 ? `(还有 ${queue.pending} 项排队)` : ""}`;
+    } else if (queue.currentItem) {
       queueText = `正在解析:${queue.currentItem.title ?? (queue.currentItem.kind === "image" ? "图片" : "记录")}${waiting > 1 ? `(还有 ${waiting - 1} 项)` : ""}`;
     } else if (waiting > 0) {
       queueText = queue.blockedReason ? `${waiting} 项等待中 · ${queue.blockedReason}` : `${waiting} 项排队中`;

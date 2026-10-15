@@ -319,7 +319,11 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(std::fs::read_dir(dir.path().join("bk")).unwrap().count(), 1, "升级前应自动备份");
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("bk")).unwrap().count(),
+            1,
+            "升级前应自动备份"
+        );
     }
 
     #[test]
@@ -332,7 +336,9 @@ mod tests {
         })
         .unwrap();
         let v: String = db
-            .with_read(|c| Ok(c.query_row("SELECT value FROM settings WHERE key='k'", [], |r| r.get(0))?))
+            .with_read(|c| {
+                Ok(c.query_row("SELECT value FROM settings WHERE key='k'", [], |r| r.get(0))?)
+            })
             .unwrap();
         assert_eq!(v, "v");
         // 读连接禁止写入

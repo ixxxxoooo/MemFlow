@@ -42,6 +42,8 @@ pub struct Settings {
     pub llm_model: String,
     /// 直连下载使用的 Ollama 模型仓库地址(可换成镜像)
     pub model_registry: String,
+    /// 入库并发处理的文档数(0 = 自动,按 CPU 核数;上限 8)
+    pub import_concurrency: u32,
 }
 
 /// 文本模型来源:本地 Ollama
@@ -69,6 +71,7 @@ impl Default for Settings {
             llm_base_url: "https://api.deepseek.com".into(),
             llm_model: "deepseek-chat".into(),
             model_registry: "https://registry.ollama.ai".into(),
+            import_concurrency: 0,
         }
     }
 }
@@ -130,6 +133,11 @@ impl Settings {
                 return Err(AppError::Invalid("云端模型名不能为空".into()));
             }
         }
+        if self.import_concurrency > 8 {
+            return Err(AppError::Invalid(
+                "入库并发数需在 0~8 之间(0 为自动)".into(),
+            ));
+        }
         if !(0.0..=1.0).contains(&self.score_threshold) {
             return Err(AppError::Invalid("相关性阈值需在 0~1 之间".into()));
         }
@@ -185,6 +193,23 @@ mod tests {
         };
         assert!(bad.validate().is_err());
         assert_eq!(Settings::default().active_text_model(), "qwen2.5:7b");
+    }
+
+    #[test]
+    fn 入库并发数范围校验() {
+        let ok = Settings {
+            import_concurrency: 8,
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+        let bad = Settings {
+            import_concurrency: 9,
+            ..Settings::default()
+        };
+        assert!(bad.validate().is_err());
+        // 旧版本保存的设置缺少该字段时回落为自动
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.import_concurrency, 0);
     }
 
     #[test]

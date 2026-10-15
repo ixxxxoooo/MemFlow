@@ -1,8 +1,9 @@
 // @author ygw
-//! 持久化任务队列与串行 Worker。
+//! 持久化任务队列与并发 Worker。
 //!
 //! - 任务存于 SQLite,应用崩溃/重启后自动恢复
-//! - 单 Worker 串行执行(16GB 内存下避免多个模型并发)
+//! - 多任务并发执行(并发数见设置 `import_concurrency`);各阶段资源用信号量分别限流,
+//!   见 `core::Stages`,本地大模型调用仍保持串行以控制内存
 //! - 临时不可用(Ollama 未开/模型未装)不消耗重试次数;业务错误指数退避重试
 //! - 有用户问答进行时,后台任务让路
 
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::task::JoinSet;
 
 /// 任务类型:处理一条记录(解析 → 提取 → 分块 → 向量化)
 pub const KIND_PROCESS_ITEM: &str = "process_item";
@@ -108,7 +110,15 @@ pub fn queue_status(core: &Core) -> Result<QueueStatus> {
             .optional()?;
         Ok(QueueStatus { pending: cnt("pending")?, running: cnt("running")?, failed: cnt("failed")?, current_item: None, blocked_reason: blocked })
     })?;
-    if let Some(cur) = core.current_job.lock().unwrap().clone() {
+    // 多任务并发时展示 id 最小的那个
+    let first = core
+        .current_jobs
+        .lock()
+        .unwrap()
+        .iter()
+        .min_by_key(|j| j.job_id)
+        .cloned();
+    if let Some(cur) = first {
         let title = core.db.with_read(|c| repo::get_item(c, cur.item_id))?.map(
             |it| json!({"id": it.id, "kind": it.kind, "title": it.title.or(it.original_name)}),
         );
@@ -211,7 +221,7 @@ fn settle(core: &Core, job: &Job, result: Result<()>) -> Result<()> {
 /// 执行一个任务(在独立 tokio 任务中运行以捕获 panic)
 async fn run_job(core: &Arc<Core>, job: Job) -> Result<()> {
     let token = CancelToken::default();
-    *core.current_job.lock().unwrap() = Some(CurrentJob {
+    core.current_jobs.lock().unwrap().push(CurrentJob {
         job_id: job.id,
         item_id: job.item_id,
         token: token.clone(),
@@ -224,29 +234,74 @@ async fn run_job(core: &Arc<Core>, job: Job) -> Result<()> {
         Ok(r) => r,
         Err(e) => Err(AppError::Other(format!("任务内部崩溃: {e}"))),
     };
-    *core.current_job.lock().unwrap() = None;
+    core.current_jobs
+        .lock()
+        .unwrap()
+        .retain(|j| j.job_id != job.id);
     settle(core, &job, result)?;
     core.emit("item-updated", json!({ "id": job.item_id }));
     emit_status(core);
     Ok(())
 }
 
-/// 处理所有到期任务,直到队列暂时为空
+/// 处理所有到期任务,直到队列暂时为空。最多同时运行 `import_concurrency` 个任务。
 ///
 /// 参数: core 核心
 /// 返回: 本轮处理的任务数
 pub async fn drain_once(core: &Arc<Core>) -> Result<usize> {
+    let mut running: JoinSet<Result<()>> = JoinSet::new();
     let mut n = 0;
+    let mut first_err: Option<AppError> = None;
+    // 队列是否已被领空;任务完成后会重新尝试领取(期间可能有新入队的任务)
+    let mut exhausted = false;
     loop {
-        // 用户正在问答时让路,避免抢占模型
-        while core.chat_busy() {
-            tokio::time::sleep(Duration::from_millis(500)).await;
+        if !exhausted {
+            let limit = core.import_concurrency().max(1);
+            // 用户正在问答时不再领取新任务,让路给对话;已在运行的任务自然结束
+            while running.len() < limit && !core.chat_busy() {
+                match claim_next(core) {
+                    Ok(Some(job)) => {
+                        let c = core.clone();
+                        running.spawn(async move { run_job(&c, job).await });
+                    }
+                    Ok(None) => {
+                        exhausted = true;
+                        break;
+                    }
+                    Err(e) => {
+                        // 领取失败时不能直接返回,否则会中断已在运行的任务
+                        tracing::error!("领取任务失败: {e}");
+                        first_err.get_or_insert(e);
+                        exhausted = true;
+                        break;
+                    }
+                }
+            }
         }
-        let Some(job) = claim_next(core)? else { break };
-        run_job(core, job).await?;
-        n += 1;
+        if running.is_empty() {
+            if exhausted {
+                break;
+            }
+            // 没有运行中的任务且在让路:稍等再试
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+        match running.join_next().await {
+            Some(Ok(Ok(()))) => n += 1,
+            Some(Ok(Err(e))) => {
+                // 单个任务的收尾失败(如写库错误)不应拖垮其它并发任务
+                tracing::error!("任务收尾失败: {e}");
+                first_err.get_or_insert(e);
+            }
+            Some(Err(e)) => tracing::error!("任务异常退出: {e}"),
+            None => {}
+        }
+        exhausted = false;
     }
-    Ok(n)
+    match first_err {
+        Some(e) if n == 0 => Err(e),
+        _ => Ok(n),
+    }
 }
 
 /// 后台 Worker 主循环(永不退出)
@@ -280,7 +335,7 @@ pub fn cancel_item(core: &Core, item_id: i64) -> Result<()> {
         }
         Ok(())
     })?;
-    if let Some(cur) = core.current_job.lock().unwrap().as_ref() {
+    for cur in core.current_jobs.lock().unwrap().iter() {
         if cur.item_id == item_id {
             cur.token.cancel();
         }

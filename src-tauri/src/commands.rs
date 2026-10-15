@@ -113,7 +113,9 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
         required: settings.vision_enabled,
         local: true,
     });
-    let stats = core.db.with_read(|c| repo::stats(c, &settings.embed_model))?;
+    let stats = core
+        .db
+        .with_read(|c| repo::stats(c, &settings.embed_model))?;
     Ok(AppStatus {
         ollama_running: running,
         ollama_version: version,

@@ -70,6 +70,8 @@ export interface Settings {
   llmModel: string;
   /** 直连下载使用的模型仓库地址(可换镜像) */
   modelRegistry: string;
+  /** 入库并发处理的文档数(0 = 自动) */
+  importConcurrency: number;
 }
 
 export interface Stats {

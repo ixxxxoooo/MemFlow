@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 /// 事件发送抽象(生产环境对接 Tauri,测试环境可收集或丢弃)
 pub trait EventSink: Send + Sync {
@@ -89,6 +89,58 @@ pub struct CurrentJob {
     pub token: CancelToken,
 }
 
+/// 入库流水线的分阶段并发限制。
+///
+/// 多个任务同时处理时,各阶段的资源占用不同,用信号量分别限流,避免互相抢占:
+/// - cpu:文档解析/OCR/分块(吃 CPU)
+/// - embed:向量化(Ollama 并行度有限)
+/// - llm_local:本地文本/视觉模型(内存大户,串行)
+/// - llm_cloud:云端文本模型(远程服务,可并发)
+pub struct Stages {
+    pub cpu: Arc<Semaphore>,
+    pub embed: Arc<Semaphore>,
+    pub llm_local: Arc<Semaphore>,
+    pub llm_cloud: Arc<Semaphore>,
+}
+
+/// 向量化阶段并发上限
+pub const EMBED_CONCURRENCY: usize = 2;
+/// 云端模型阶段并发上限
+pub const CLOUD_LLM_CONCURRENCY: usize = 4;
+
+impl Stages {
+    /// 按 CPU 核数创建
+    pub fn new() -> Stages {
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        Stages {
+            cpu: Arc::new(Semaphore::new((cores / 2).clamp(1, 4))),
+            embed: Arc::new(Semaphore::new(EMBED_CONCURRENCY)),
+            llm_local: Arc::new(Semaphore::new(1)),
+            llm_cloud: Arc::new(Semaphore::new(CLOUD_LLM_CONCURRENCY)),
+        }
+    }
+}
+
+impl Default for Stages {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 获取某个阶段的并发许可(信号量被关闭时返回错误,正常运行中不会发生)
+pub async fn permit(sem: &Arc<Semaphore>) -> Result<OwnedSemaphorePermit> {
+    sem.clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| crate::error::AppError::Other("并发控制已关闭".into()))
+}
+
+/// 自动并发度:物理核数的一半,限制在 1~4
+pub fn auto_import_concurrency() -> usize {
+    let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+    (cores / 2).clamp(1, 4)
+}
+
 /// 应用核心
 pub struct Core {
     pub paths: AppPaths,
@@ -104,7 +156,10 @@ pub struct Core {
     /// 唤醒后台 Worker
     pub wake: Notify,
     chat_active: AtomicUsize,
-    pub current_job: Mutex<Option<CurrentJob>>,
+    /// 正在执行的任务(多 worker 并发时可能有多个)
+    pub current_jobs: Mutex<Vec<CurrentJob>>,
+    /// 入库流水线分阶段限流
+    pub stages: Stages,
     /// 最近使用的"对话类"模型(文本/视觉),切换时卸载旧模型以节省内存
     last_chat_model: Mutex<Option<String>>,
     /// 当前问答的取消标志
@@ -143,7 +198,8 @@ impl Core {
             sink,
             wake: Notify::new(),
             chat_active: AtomicUsize::new(0),
-            current_job: Mutex::new(None),
+            current_jobs: Mutex::new(Vec::new()),
+            stages: Stages::new(),
             last_chat_model: Mutex::new(None),
             chat_cancel: Mutex::new(None),
         };
@@ -151,6 +207,14 @@ impl Core {
         tracing::info!("向量索引已载入 {n} 条");
         crate::queue::recover_after_crash(&core.db)?;
         Ok(Arc::new(core))
+    }
+
+    /// 实际生效的入库并发 worker 数(设置为 0 表示自动)
+    pub fn import_concurrency(&self) -> usize {
+        match self.settings().import_concurrency {
+            0 => auto_import_concurrency(),
+            n => n as usize,
+        }
     }
 
     /// 当前设置的副本
