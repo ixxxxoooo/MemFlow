@@ -137,7 +137,7 @@ export function DocModal() {
             {editing ? (
               <>
                 <button className={btn} onClick={() => void cancelEdit()} disabled={saving}>取消</button>
-                <button className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--on-accent)] disabled:opacity-40" disabled={saving || !dirty} onClick={() => void save()}>
+                <button className="btn btn-primary" disabled={saving || !dirty} onClick={() => void save()}>
                   {saving ? "保存中…" : "保存并重新索引"}
                 </button>
               </>

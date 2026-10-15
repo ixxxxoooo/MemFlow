@@ -79,7 +79,7 @@ export function DocsView() {
           <SearchIcon size={14} className="text-[var(--fg-faint)]" />
           <input className="w-full bg-transparent text-[13px] outline-none" placeholder="搜索文档" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--on-accent)]" onClick={() => void importFiles()}>
+        <button className="btn btn-primary" onClick={() => void importFiles()}>
           <UploadIcon size={14} />导入文档
         </button>
       </div>

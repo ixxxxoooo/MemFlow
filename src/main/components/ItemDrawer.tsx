@@ -121,7 +121,7 @@ export function ItemDrawer() {
                     <textarea className="h-40 w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--bg-soft)] p-2 text-[13px] outline-none focus:border-[var(--accent)]" value={draft} onChange={(e) => setDraft(e.target.value)} />
                     <div className="flex justify-end gap-2">
                       <button className="rounded-md px-3 py-1 text-xs hover:bg-[var(--bg-soft)]" onClick={() => setEditing(false)}>取消</button>
-                      <button className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs text-[var(--on-accent)]" onClick={async () => { await act(() => api.updateItemContent(it.id, draft), "已保存,正在重新解析"); setEditing(false); }}>保存并重刷</button>
+                      <button className="btn btn-primary btn-sm" onClick={async () => { await act(() => api.updateItemContent(it.id, draft), "已保存,正在重新解析"); setEditing(false); }}>保存并重刷</button>
                     </div>
                   </div>
                 ) : (

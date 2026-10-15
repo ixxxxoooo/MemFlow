@@ -51,7 +51,63 @@ body {
 .main-body { background: transparent; }
 .capsule-body, .toast-body { background: transparent; }
 textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-select: text; }
-button { font: inherit; color: inherit; cursor: default; }
+/* 注意:这里必须放进 @layer base。
+   未分层的样式优先级高于 Tailwind 的 @layer utilities,
+   曾因 `button { font: inherit; color: inherit }` 导致 text-* / font-* 工具类全部失效,
+   使按钮文字与背景颜色相近、字号错乱。 */
+@layer base {
+  button { cursor: default; }
+}
+
+/* ===== 统一按钮组件(放入 components 层,允许被工具类覆盖) ===== */
+@layer components {
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border-radius: 8px; padding: 6px 14px; font-size: 12px; line-height: 1.4; font-weight: 500;
+    border: 1px solid transparent; white-space: nowrap;
+    transition: background-color .15s, border-color .15s, opacity .15s, transform .05s;
+  }
+  .btn:active:not(:disabled) { transform: translateY(0.5px); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .4; pointer-events: none; }
+  .btn-primary { background: var(--accent); color: var(--on-accent); }
+  .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+  .btn-secondary { border-color: var(--line); background: transparent; color: var(--fg); }
+  .btn-secondary:hover:not(:disabled) { background: var(--bg-soft); }
+  .btn-ghost { background: transparent; color: var(--fg-dim); }
+  .btn-ghost:hover:not(:disabled) { background: var(--bg-soft); color: var(--fg); }
+  .btn-danger { background: var(--err); color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 88%, #000); }
+  .btn-sm { padding: 3px 10px; border-radius: 6px; }
+
+  /* 开关(替代原生复选框) */
+  .switch {
+    appearance: none; -webkit-appearance: none; position: relative; flex-shrink: 0;
+    width: 34px; height: 20px; border-radius: 999px; background: var(--line);
+    border: 1px solid var(--line); transition: background-color .15s; cursor: default;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 1px; left: 1px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s;
+  }
+  .switch:checked { background: var(--accent); border-color: var(--accent); }
+  .switch:checked::after { transform: translateX(14px); }
+  .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* 分段选择器 */
+  .seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--bg-soft); border: 1px solid var(--line); }
+  .seg > button { padding: 4px 12px; border-radius: 7px; font-size: 12px; color: var(--fg-dim); transition: background-color .15s, color .15s; }
+  .seg > button:hover { color: var(--fg); }
+  .seg > button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 500; }
+
+  /* 下拉框 */
+  .select {
+    appearance: none; -webkit-appearance: none; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg-soft) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%237d7972' stroke-width='1.5' stroke-linecap='round'/></svg>") no-repeat right 10px center;
+    padding: 6px 28px 6px 10px; font-size: 13px; color: var(--fg); outline: none;
+  }
+  .select:focus { border-color: var(--accent); }
+}
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); background-clip: padding-box; border: 3px solid transparent; }
