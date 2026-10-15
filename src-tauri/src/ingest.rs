@@ -170,10 +170,18 @@ fn store_attachment(attach_root: &Path, src: &Path) -> Result<StoredFile> {
 /// 返回: 位于附件目录内的绝对路径
 pub fn attachment_abs(core: &Core, rel: &str) -> Result<PathBuf> {
     let rel_path = Path::new(rel);
+    // Windows 上 "/etc/passwd"、"C:foo" 不算 is_absolute,但 join 后仍会逃出附件目录,
+    // 因此按路径组件拒绝根目录、盘符前缀与 ".."
     if rel_path.is_absolute()
-        || rel_path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+        || rel_path.has_root()
+        || rel_path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
     {
         return Err(AppError::Invalid("非法附件路径".into()));
     }
@@ -927,6 +935,11 @@ mod tests {
         let core = test_core(dir.path(), "http://127.0.0.1:9");
         assert!(attachment_abs(&core, "../etc/passwd").is_err());
         assert!(attachment_abs(&core, "/etc/passwd").is_err());
+        #[cfg(windows)]
+        {
+            assert!(attachment_abs(&core, "C:\\Windows\\win.ini").is_err());
+            assert!(attachment_abs(&core, "C:win.ini").is_err());
+        }
         assert!(attachment_abs(&core, "ab/cd.png").is_ok());
     }
 }

@@ -56,7 +56,8 @@ jobs:
           - name: Windows
             os: windows-latest
           - name: Linux
-            os: ubuntu-22.04
+            # ort 预编译库需要 glibc ≥ 2.38,故使用 24.04
+            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
