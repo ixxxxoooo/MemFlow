@@ -16,6 +16,7 @@ describe("文档类型", () => {
   });
   it("渲染方式", () => {
     expect(renderAsMarkdown("a.docx")).toBe(true);
-    expect(renderAsMarkdown("a.pdf")).toBe(false);
+    expect(renderAsMarkdown("a.pdf")).toBe(true);
+    expect(renderAsMarkdown("a.txt")).toBe(false);
   });
 });

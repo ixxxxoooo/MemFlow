@@ -29,6 +29,8 @@ pub struct Hit {
     pub title: Option<String>,
     pub text: String,
     pub heading: Option<String>,
+    /// 所在页码(PDF 文档)
+    pub page: Option<i64>,
     pub doc_summary: Option<String>,
     pub summary: Option<String>,
     pub tags: Vec<String>,
@@ -102,7 +104,7 @@ fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
     let placeholders = vec!["?"; ids.len()].join(",");
     let sql = format!(
         "SELECT c.id, c.item_id, i.kind, COALESCE(i.title, i.original_name), c.text, c.heading, c.doc_summary, \
-         m.summary, m.tags, i.created_at, i.attachment_path \
+         m.summary, m.tags, i.created_at, i.attachment_path, c.page \
          FROM chunks c JOIN items i ON i.id = c.item_id LEFT JOIN item_meta m ON m.item_id = i.id \
          WHERE c.id IN ({placeholders})"
     );
@@ -118,6 +120,7 @@ fn load_hits(core: &Core, ids: &[i64]) -> Result<HashMap<i64, Hit>> {
                 title: r.get(3)?,
                 text: r.get(4)?,
                 heading: heading.filter(|h| !h.is_empty()),
+                page: r.get(11)?,
                 doc_summary: r.get(6)?,
                 summary: r.get(7)?,
                 tags: tags

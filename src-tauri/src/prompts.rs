@@ -118,6 +118,22 @@ pub fn vision_messages(caption: &str, image_b64: String) -> Vec<ChatMessage> {
     vec![m]
 }
 
+/// 构造"PDF 页面转 Markdown"的视觉请求
+///
+/// 参数: page_png_b64 页面渲染图的 base64
+/// 返回: 单条用户消息
+pub fn pdf_page_messages(page_png_b64: String) -> Vec<ChatMessage> {
+    let prompt = "把这一页文档转换为 Markdown,严格遵守:\n\
+        1. 保留阅读顺序;标题用 # 层级表示;列表用 - 表示。\n\
+        2. 表格必须输出为 Markdown 表格(含表头分隔行),单元格内容逐字抄录,合并单元格重复填写。\n\
+        3. 逐字转录页面上所有文字,不要翻译、总结或补充说明。\n\
+        4. 忽略页眉页脚和页码;图片/图表用一句话 [图:说明] 概括。\n\
+        只输出 Markdown 正文,不要使用代码围栏。";
+    let mut m = ChatMessage::new("user", prompt.to_string());
+    m.images = Some(vec![page_png_b64]);
+    vec![m]
+}
+
 /// 判断用户是否明确要求以图表形式呈现(流程图、时序图、脑图等)
 ///
 /// 参数: question 用户问题

@@ -44,6 +44,8 @@ pub struct ChunkView {
     pub heading: Option<String>,
     pub doc_summary: Option<String>,
     pub embed_model: Option<String>,
+    /// 所在页码(PDF 文档)
+    pub page: Option<i64>,
 }
 
 /// 记录列表过滤条件
@@ -79,6 +81,8 @@ pub struct NewChunk {
     pub embed_model: String,
     pub embedding: Vec<u8>,
     pub dim: usize,
+    /// 所在页码(PDF 文档)
+    pub page: Option<i64>,
     /// 写入 FTS5 的分词串
     pub fts_tokens: String,
 }
@@ -366,8 +370,8 @@ pub fn replace_chunks(c: &Connection, item_id: i64, chunks: &[NewChunk]) -> Resu
     let mut ids = Vec::with_capacity(chunks.len());
     for (seq, ch) in chunks.iter().enumerate() {
         c.execute(
-            "INSERT INTO chunks(item_id,seq,text,heading,doc_summary,embed_model,dim,embedding) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-            params![item_id, seq as i64, ch.text, ch.heading, ch.doc_summary, ch.embed_model, ch.dim as i64, ch.embedding],
+            "INSERT INTO chunks(item_id,seq,text,heading,doc_summary,embed_model,dim,embedding,page) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![item_id, seq as i64, ch.text, ch.heading, ch.doc_summary, ch.embed_model, ch.dim as i64, ch.embedding, ch.page],
         )?;
         let id = c.last_insert_rowid();
         c.execute(
@@ -386,7 +390,7 @@ pub fn clear_chunks(c: &Connection, item_id: i64) -> Result<()> {
 
 /// 读取某记录的切片
 pub fn list_chunks(c: &Connection, item_id: i64) -> Result<Vec<ChunkView>> {
-    let mut stmt = c.prepare_cached("SELECT id, seq, text, heading, doc_summary, embed_model FROM chunks WHERE item_id = ?1 ORDER BY seq")?;
+    let mut stmt = c.prepare_cached("SELECT id, seq, text, heading, doc_summary, embed_model, page FROM chunks WHERE item_id = ?1 ORDER BY seq")?;
     let rows = stmt.query_map([item_id], |r| {
         Ok(ChunkView {
             id: r.get(0)?,
@@ -395,6 +399,7 @@ pub fn list_chunks(c: &Connection, item_id: i64) -> Result<Vec<ChunkView>> {
             heading: r.get(3)?,
             doc_summary: r.get(4)?,
             embed_model: r.get(5)?,
+            page: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -656,6 +661,7 @@ mod tests {
             embed_model: "m".into(),
             embedding: vec![0, 0, 128, 63],
             dim: 1,
+            page: None,
             fts_tokens: t.into(),
         };
         db.with_tx(|tx| replace_chunks(tx, id, &[mk("预算"), mk("缩减")]).map(|_| ()))
@@ -698,6 +704,7 @@ mod tests {
                     embed_model: "old".into(),
                     embedding: vec![],
                     dim: 0,
+                    page: None,
                     fts_tokens: "a".into(),
                 }],
             )

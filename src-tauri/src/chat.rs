@@ -60,6 +60,8 @@ pub struct SourceView {
     pub title: Option<String>,
     pub text: String,
     pub heading: Option<String>,
+    /// 所在页码(PDF 文档)
+    pub page: Option<i64>,
     pub created_at: i64,
     pub attachment_path: Option<String>,
     pub score: f32,
@@ -80,6 +82,7 @@ pub fn to_sources(hits: &[Hit]) -> Vec<SourceView> {
             title: h.title.clone(),
             text: h.text.clone(),
             heading: h.heading.clone(),
+            page: h.page,
             created_at: h.created_at,
             attachment_path: h.attachment_path.clone(),
             score: h.score,
@@ -116,6 +119,9 @@ pub fn build_context(hits: &[Hit]) -> (String, usize) {
                 );
                 if let Some(hd) = &h.heading {
                     s.push_str(&format!(" 章节:{hd}"));
+                }
+                if let Some(pg) = h.page {
+                    s.push_str(&format!(" 第{pg}页"));
                 }
                 if let Some(ds) = h.doc_summary.as_ref().filter(|x| !x.is_empty()) {
                     s.push_str(&format!("\n文档摘要:{ds}"));
@@ -411,6 +417,7 @@ mod tests {
             title: Some("标题".into()),
             text: text.into(),
             heading: None,
+            page: None,
             doc_summary: None,
             summary: None,
             tags: vec!["项目A".into()],

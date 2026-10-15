@@ -129,7 +129,7 @@ Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后�
 ## 已知限制
 
 - 胶囊在其他应用的全屏 Space 上可能不显示(未使用 NSPanel)。
-- 扫描版 PDF 无 OCR;视觉模型默认关闭。
+- PDF 的 OCR / 表格还原目前仅 macOS 可用(PDFKit + Vision);其它平台回退为纯文本层。文本层 PDF 中的表格仅做段落重排,需要高精度表格可在设置里切换「视觉模型」解析模式。视觉模型默认关闭。
 - 发布包为 ad-hoc 签名,未公证(见上文)。
 
 ## 参与贡献

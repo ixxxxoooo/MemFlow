@@ -11,6 +11,7 @@ use crate::core::{permit, CancelToken, Core, EMBED_CONCURRENCY};
 use crate::error::{AppError, Result};
 use crate::extract;
 use crate::ollama::OllamaClient;
+use crate::pdf_ingest;
 use crate::prompts::{self, ExtractedMeta, VisionResult, PROMPT_VERSION};
 use crate::repo::{self, ItemView, NewChunk, NewMeta};
 use crate::tokenizer;
@@ -277,9 +278,13 @@ pub async fn process_item(
         let path = abs
             .clone()
             .ok_or_else(|| AppError::Invalid("文档缺少附件".into()))?;
-        let _cpu = permit(&core.stages.cpu).await?;
-        content = extract::extract_text(&path).await?;
-        drop(_cpu);
+        content = if extract::ext_lower(&path) == "pdf" {
+            // PDF 逐页解析,内部按页获取 CPU 许可(OCR 可能很久,不能整段占用)
+            pdf_ingest::extract_pdf(core, &path, token).await?
+        } else {
+            let _cpu = permit(&core.stages.cpu).await?;
+            extract::extract_text(&path).await?
+        };
         core.db
             .with(|c| repo::update_item_text(c, item_id, None, &content))?;
     }
@@ -340,6 +345,8 @@ pub async fn process_item(
     // 文档默认只做快速索引(不调用 LLM);设置开启或任务显式要求 AI 时才解读
     let use_ai = item.kind != "document" || s.doc_ai_enrich || is_ai_mode(mode);
     let mut ai_used = false;
+    // 提取元数据时不带页标记
+    let plain_text = chunker::strip_page_marks(&index_text);
     let meta: Option<ExtractedMeta> = if let Some(v) = vision.as_ref() {
         ai_used = true;
         Some(clean_meta(ExtractedMeta {
@@ -349,9 +356,9 @@ pub async fn process_item(
             entities: vec![],
         }))
     } else if !use_ai {
-        Some(local_meta(&index_text))
+        Some(local_meta(&plain_text))
     } else {
-        let m = extract_meta(core, &index_text, &tl, item.kind == "document", token).await?;
+        let m = extract_meta(core, &plain_text, &tl, item.kind == "document", token).await?;
         ai_used = m.is_some();
         m
     };
@@ -362,6 +369,7 @@ pub async fn process_item(
             vec![ChunkPiece {
                 text: index_text.trim().to_string(),
                 heading: String::new(),
+                page: None,
             }]
         } else {
             // 长文分块与分词吃 CPU,放到阻塞线程并受 CPU 许可限流
@@ -434,6 +442,7 @@ pub async fn process_item(
                     embed_model: embed_model.clone(),
                     embedding: vector::encode(v),
                     dim,
+                    page: p.page.map(i64::from),
                     fts_tokens: tokenizer::index_tokens(&format!(
                         "{title} {tags_text} {summary_text} {}",
                         p.text
@@ -555,6 +564,7 @@ mod tests {
         let p = ChunkPiece {
             text: "正文".into(),
             heading: "一章".into(),
+            page: None,
         };
         let d = build_embed_input("document", "文档名", &meta, &p);
         assert!(

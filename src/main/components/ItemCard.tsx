@@ -8,6 +8,7 @@ import type { Item } from "../../lib/types";
 import { DeleteItemButton } from "./DeleteItemButton";
 import { AlertIcon, ImageIcon } from "./icons";
 import { useAttachmentUrl } from "./ItemDrawer";
+import { stripPageMarks } from "../../lib/pageMarks";
 
 export function StatusChip({ item }: { item: Item }) {
   const { toast, refreshStatus, bumpData } = useApp();
@@ -38,7 +39,7 @@ export function StatusChip({ item }: { item: Item }) {
 export function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: string) => void; selected?: boolean }) {
   const openDrawer = useApp((s) => s.openDrawer);
   const url = useAttachmentUrl(item.attachmentPath);
-  const text = item.kind === "image" ? item.content || item.summary || "" : item.content;
+  const text = stripPageMarks(item.kind === "image" ? item.content || item.summary || "" : item.content);
   return (
     <div
       onClick={() => openDrawer(item.id)}

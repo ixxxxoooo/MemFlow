@@ -121,7 +121,7 @@ export function ChatView() {
                       {m.sources.map((s) => (
                         <button key={s.n} onClick={() => onCite(s)} className="flex max-w-[200px] items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 hover:border-[var(--accent)] hover:text-[var(--accent)]">
                           <span className="font-semibold text-[var(--accent)]">{s.n}</span>
-                          <span className="truncate">{s.title ?? (s.kind === "image" ? "图片" : "记录")}</span>
+                          <span className="truncate">{s.title ?? (s.kind === "image" ? "图片" : "记录")}{s.page ? ` p.${s.page}` : ""}</span>
                         </button>
                       ))}
                     </div>

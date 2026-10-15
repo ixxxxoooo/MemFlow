@@ -9,6 +9,7 @@ import { fmtDate, fmtTime } from "../../lib/format";
 import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
+import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
 import { CloseIcon, EditIcon, RefreshIcon, TrashIcon } from "./icons";
 
 /** 根据附件相对路径生成可显示的 URL */
@@ -118,7 +119,7 @@ export function ItemDrawer() {
               <section>
                 <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-[var(--fg-dim)]">
                   <span>{it.kind === "image" ? "图片说明" : "原文"}</span>
-                  {!editing && <button className="flex items-center gap-1 hover:text-[var(--fg)]" onClick={() => { setDraft(it.content); setEditing(true); }}><EditIcon size={12} />编辑</button>}
+                  {!editing && <button className="flex items-center gap-1 hover:text-[var(--fg)]" onClick={() => { setDraft(stripPageMarks(it.content)); setEditing(true); }}><EditIcon size={12} />编辑</button>}
                 </div>
                 {editing ? (
                   <div className="space-y-2">
@@ -129,7 +130,7 @@ export function ItemDrawer() {
                     </div>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap leading-relaxed">{it.content || <span className="text-[var(--fg-faint)]">(无文字说明)</span>}</p>
+                  <p className="whitespace-pre-wrap leading-relaxed">{stripPageMarks(it.content) || <span className="text-[var(--fg-faint)]">(无文字说明)</span>}</p>
                 )}
               </section>
             )}
@@ -149,7 +150,7 @@ export function ItemDrawer() {
                     const hl = c.id === drawer.chunkId;
                     return (
                       <div key={c.id} ref={hl ? hlRef : undefined} className={`rounded-lg border p-2.5 ${hl ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}>
-                        <div className="mb-1 text-[10px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}</div>
+                        <div className="mb-1 text-[10px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}{pageLabel(c.page)}</div>
                         <p className="whitespace-pre-wrap leading-relaxed">{c.text}</p>
                       </div>
                     );

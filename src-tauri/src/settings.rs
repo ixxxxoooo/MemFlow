@@ -44,7 +44,14 @@ pub struct Settings {
     pub model_registry: String,
     /// 入库并发处理的文档数(0 = 自动,按 CPU 核数;上限 8)
     pub import_concurrency: u32,
+    /// PDF 解析模式:auto = 文本层 + 扫描页自动 OCR(推荐);vision = 视觉模型逐页转 Markdown(慢,表格/版面更准)
+    pub pdf_parse_mode: String,
 }
+
+/// PDF 解析模式:自动(文本层 + 本机 OCR)
+pub const PDF_MODE_AUTO: &str = "auto";
+/// PDF 解析模式:视觉模型逐页解析
+pub const PDF_MODE_VISION: &str = "vision";
 
 /// 文本模型来源:本地 Ollama
 pub const PROVIDER_OLLAMA: &str = "ollama";
@@ -72,6 +79,7 @@ impl Default for Settings {
             llm_model: "deepseek-chat".into(),
             model_registry: "https://registry.ollama.ai".into(),
             import_concurrency: 0,
+            pdf_parse_mode: PDF_MODE_AUTO.into(),
         }
     }
 }
@@ -132,6 +140,11 @@ impl Settings {
             if self.llm_model.trim().is_empty() {
                 return Err(AppError::Invalid("云端模型名不能为空".into()));
             }
+        }
+        if self.pdf_parse_mode != PDF_MODE_AUTO && self.pdf_parse_mode != PDF_MODE_VISION {
+            return Err(AppError::Invalid(
+                "PDF 解析模式只能是 auto 或 vision".into(),
+            ));
         }
         if self.import_concurrency > 8 {
             return Err(AppError::Invalid(
@@ -210,6 +223,12 @@ mod tests {
         // 旧版本保存的设置缺少该字段时回落为自动
         let s: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.import_concurrency, 0);
+        assert_eq!(s.pdf_parse_mode, PDF_MODE_AUTO);
+        let bad_mode = Settings {
+            pdf_parse_mode: "other".into(),
+            ..Settings::default()
+        };
+        assert!(bad_mode.validate().is_err());
     }
 
     #[test]

@@ -29,12 +29,12 @@ export function editModeOf(name: string | null | undefined): DocEditMode {
 }
 
 /**
- * 预览时是否按 Markdown 渲染(md、docx 提取结果带 # 标题;其余按原样排版)
+ * 预览时是否按 Markdown 渲染(md、docx、pdf 的提取结果带 # 标题与 Markdown 表格;txt 按原样排版)
  *
  * 参数: name 文件名
  * 返回: 是否按 Markdown 渲染
  */
 export function renderAsMarkdown(name: string | null | undefined): boolean {
   const e = docExt(name);
-  return e === "md" || e === "markdown" || e === "docx";
+  return e === "md" || e === "markdown" || e === "docx" || e === "pdf";
 }

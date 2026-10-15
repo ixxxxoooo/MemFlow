@@ -34,6 +34,8 @@ export interface Chunk {
   heading: string | null;
   docSummary: string | null;
   embedModel: string | null;
+  /** 所在页码(PDF) */
+  page: number | null;
 }
 
 export interface ItemDetail {
@@ -72,6 +74,8 @@ export interface Settings {
   modelRegistry: string;
   /** 入库并发处理的文档数(0 = 自动) */
   importConcurrency: number;
+  /** PDF 解析模式:auto 文本层+本机 OCR / vision 视觉模型逐页解析 */
+  pdfParseMode: "auto" | "vision";
 }
 
 export interface Stats {
@@ -129,6 +133,8 @@ export interface Source {
   title: string | null;
   text: string;
   heading: string | null;
+  /** 所在页码(PDF) */
+  page: number | null;
   createdAt: number;
   attachmentPath: string | null;
   score: number;

@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { editModeOf, renderAsMarkdown } from "../../lib/docKind";
+import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
 import { fmtDate, fmtTime } from "../../lib/format";
 import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
@@ -29,7 +30,8 @@ export function DocModal() {
 
   const it = detail?.item;
   const mode = editModeOf(it?.originalName);
-  const dirty = editing && !!it && draft !== it.content;
+  const plainContent = it ? stripPageMarks(it.content) : "";
+  const dirty = editing && !!it && draft !== plainContent;
 
   const load = useCallback(async () => {
     if (!docModal) return;
@@ -89,7 +91,7 @@ export function DocModal() {
 
   const startEdit = () => {
     if (!it) return;
-    setDraft(it.content);
+    setDraft(plainContent);
     setEditing(true);
   };
 
@@ -188,7 +190,7 @@ export function DocModal() {
           {it?.error && <div className="mb-3 rounded-lg bg-[var(--err)]/10 p-2.5 text-xs text-[var(--err)]">{it.error}</div>}
           {it && editing && mode === "wysiwyg" && (
             <Suspense fallback={<div className="text-sm text-[var(--fg-dim)]">编辑器加载中…</div>}>
-              <MarkdownEditor key={it.id} value={it.content} onChange={setDraft} />
+              <MarkdownEditor key={it.id} value={plainContent} onChange={setDraft} />
             </Suspense>
           )}
           {it && editing && mode === "plain" && (
@@ -203,14 +205,14 @@ export function DocModal() {
             <div className="mx-auto max-w-[760px]">
               {cited && (
                 <div className="mb-4 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-xs">
-                  <div className="mb-1 text-[11px] text-[var(--fg-dim)]">被引用的片段{cited.heading ? ` · ${cited.heading}` : ""}</div>
+                  <div className="mb-1 text-[11px] text-[var(--fg-dim)]">被引用的片段{cited.heading ? ` · ${cited.heading}` : ""}{pageLabel(cited.page)}</div>
                   <div className="selectable whitespace-pre-wrap leading-relaxed">{cited.text}</div>
                 </div>
               )}
               {renderAsMarkdown(it.originalName) ? (
-                <Markdown text={it.content} />
+                <Markdown text={plainContent} />
               ) : (
-                <div className="selectable whitespace-pre-wrap text-[14.5px] leading-[1.75]">{it.content}</div>
+                <div className="selectable whitespace-pre-wrap text-[14.5px] leading-[1.75]">{plainContent}</div>
               )}
             </div>
           )}
@@ -221,7 +223,7 @@ export function DocModal() {
                 const hl = c.id === docModal.chunkId;
                 return (
                   <div key={c.id} ref={hl ? hlRef : undefined} className={`rounded-lg border p-3 ${hl ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}>
-                    <div className="mb-1 text-[11px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}</div>
+                    <div className="mb-1 text-[11px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}{pageLabel(c.page)}</div>
                     <div className="selectable whitespace-pre-wrap text-[13px] leading-relaxed">{c.text}</div>
                   </div>
                 );
