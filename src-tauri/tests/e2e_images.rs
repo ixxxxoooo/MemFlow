@@ -133,7 +133,13 @@ async fn md文件夹_相对路径图片被关联_重复引用与缺失图片() {
     let img = item(&core, images[0].child_id);
     // 文件夹里显式导入的图片不是"内嵌"图片:删除文档时不会被一并清理
     assert!(!img.embedded, "{img:?}");
-    assert_eq!(img.status, "done");
+    // 非 macOS 没有本机 OCR,又未启用视觉模型时图片没有文字线索,按设计只归档不索引
+    let expected = if cfg!(target_os = "macos") {
+        "done"
+    } else {
+        "archived_only"
+    };
+    assert_eq!(img.status, expected);
 
     if cfg!(target_os = "macos") {
         let ocr = img.ocr_text.clone().unwrap_or_default();
