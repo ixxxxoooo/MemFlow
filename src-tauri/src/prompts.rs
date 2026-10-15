@@ -125,8 +125,22 @@ pub fn vision_messages(caption: &str, image_b64: String) -> Vec<ChatMessage> {
 pub fn wants_diagram(question: &str) -> bool {
     let q = question.to_lowercase();
     const KEYS: [&str; 16] = [
-        "流程图", "时序图", "甘特图", "脑图", "思维导图", "架构图", "关系图", "示意图", "图表",
-        "画图", "画个图", "画一个图", "画出", "可视化", "mermaid", "flowchart",
+        "流程图",
+        "时序图",
+        "甘特图",
+        "脑图",
+        "思维导图",
+        "架构图",
+        "关系图",
+        "示意图",
+        "图表",
+        "画图",
+        "画个图",
+        "画一个图",
+        "画出",
+        "可视化",
+        "mermaid",
+        "flowchart",
     ];
     KEYS.iter().any(|k| q.contains(k))
 }
