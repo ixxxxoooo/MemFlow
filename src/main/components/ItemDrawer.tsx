@@ -11,7 +11,8 @@ import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
 import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
 import { useKb } from "../../lib/kbStore";
-import { CloseIcon, EditIcon, MoveIcon, RefreshIcon, TrashIcon } from "./icons";
+import { briefName, useOrganize } from "../../lib/organize";
+import { CloseIcon, EditIcon, MoveIcon, RefreshIcon, SparkleIcon, TrashIcon } from "./icons";
 import { ImageThumbs } from "./ImageThumbs";
 import { MoveToMenu } from "./MoveToMenu";
 
@@ -31,8 +32,9 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 export function ItemDrawer() {
-  const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus, openDocModal } = useApp();
+  const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus, openDocModal, openDrawer } = useApp();
   const { kbs, move } = useKb();
+  const openOrganize = useOrganize((s) => s.openSingle);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -145,7 +147,29 @@ export function ItemDrawer() {
               <section>
                 <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-[var(--fg-dim)]">
                   <span>{it.kind === "image" ? "图片说明" : "原文"}</span>
-                  {!editing && <button className="flex items-center gap-1 hover:text-[var(--fg)]" onClick={() => { setDraft(stripPageMarks(it.content)); setEditing(true); }}><EditIcon size={12} />编辑</button>}
+                  {!editing && (
+                    <span className="flex items-center gap-3">
+                      {it.kind === "note" && detail && detail.revisions.length > 0 && (
+                        <button
+                          className="flex items-center gap-1 hover:text-[var(--fg)]"
+                          title="恢复到 AI 整理之前的标题与原文"
+                          onClick={async () => {
+                            if (!(await confirmDialog("撤销最近一次 AI 整理,恢复到整理前的内容?"))) return;
+                            await act(() => api.organizeUndo(it.id), "已撤销整理,正在重新索引");
+                          }}
+                        ><RefreshIcon size={12} />撤销整理</button>
+                      )}
+                      {it.kind === "note" && (
+                        <button
+                          className="flex items-center gap-1 text-[var(--accent)] hover:brightness-110 disabled:opacity-40"
+                          disabled={it.status === "pending" || it.status === "processing"}
+                          title="让 AI 把这条笔记整理得更清晰(先预览,确认后才覆盖)"
+                          onClick={() => openOrganize(it.id)}
+                        ><SparkleIcon size={12} />AI 整理</button>
+                      )}
+                      <button className="flex items-center gap-1 hover:text-[var(--fg)]" onClick={() => { setDraft(stripPageMarks(it.content)); setEditing(true); }}><EditIcon size={12} />编辑</button>
+                    </span>
+                  )}
                 </div>
                 {editing ? (
                   <div className="space-y-2">
@@ -158,6 +182,33 @@ export function ItemDrawer() {
                 ) : (
                   <p className="whitespace-pre-wrap leading-relaxed">{stripPageMarks(it.content) || <span className="text-[var(--fg-faint)]">(无文字说明)</span>}</p>
                 )}
+              </section>
+            )}
+
+            {it.kind === "note" && detail && detail.mergedSources.length > 0 && (
+              <section>
+                <div className="mb-1 text-[11px] font-medium text-[var(--fg-dim)]">归并自 {detail.mergedSources.length} 条记录</div>
+                <div className="space-y-1">
+                  {detail.mergedSources.map((b, i) => (
+                    <button key={b.id} className="flex w-full items-start gap-1.5 rounded-lg border border-[var(--line)] px-2 py-1.5 text-left text-xs hover:border-[var(--accent)]" onClick={() => openDrawer(b.id)}>
+                      <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--accent-soft)] px-1 text-[11px] font-semibold text-[var(--accent)]">{i + 1}</span>
+                      <span className="line-clamp-2">{briefName(b, 60)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {it.kind === "note" && detail && detail.mergedInto.length > 0 && (
+              <section>
+                <div className="mb-1 text-[11px] font-medium text-[var(--fg-dim)]">已归并到</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.mergedInto.map((b) => (
+                    <button key={b.id} className="max-w-full truncate rounded-full border border-[var(--accent)]/40 px-2.5 py-0.5 text-xs text-[var(--accent)] hover:bg-[var(--accent-soft)]" onClick={() => openDrawer(b.id)}>
+                      《{briefName(b, 20)}》
+                    </button>
+                  ))}
+                </div>
               </section>
             )}
 

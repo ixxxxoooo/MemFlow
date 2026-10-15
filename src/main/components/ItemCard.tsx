@@ -7,7 +7,7 @@ import { fmtTime } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import type { Item } from "../../lib/types";
 import { DeleteItemButton } from "./DeleteItemButton";
-import { AlertIcon, ImageIcon } from "./icons";
+import { AlertIcon, ImageIcon, SparkleIcon } from "./icons";
 import { useAttachmentUrl } from "./ItemDrawer";
 import { stripPageMarks } from "../../lib/pageMarks";
 
@@ -38,16 +38,33 @@ export function StatusChip({ item }: { item: Item }) {
 }
 
 /** memo:列表追加或抽屉切换时,props 未变的卡片不重渲染;cv-auto 让屏幕外的卡片跳过布局与绘制 */
-export const ItemCard = memo(function ItemCard({ item, onTag, selected }: { item: Item; onTag: (t: string) => void; selected?: boolean }) {
+export const ItemCard = memo(function ItemCard({ item, onTag, selected, selectMode, checked, onToggle, peers, onMerge }: {
+  item: Item;
+  onTag: (t: string) => void;
+  selected?: boolean;
+  /** 多选模式:点击卡片切换勾选,不打开详情;只有文字笔记可选 */
+  selectMode?: boolean;
+  checked?: boolean;
+  onToggle?: (id: number) => void;
+  /** 与本条高度相似、尚未整理的碎片 id("可整理"提示) */
+  peers?: number[];
+  onMerge?: (ids: number[]) => void;
+}) {
   const openDrawer = useApp((s) => s.openDrawer);
+  const pickable = !!selectMode && item.kind === "note";
   const url = useAttachmentUrl(item.attachmentPath);
   const text = stripPageMarks(item.kind === "image" ? item.content || item.summary || "" : item.content);
   return (
     <div
-      onClick={() => openDrawer(item.id)}
-      className={`cv-auto group pop-in relative cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected ? "border-[var(--accent)]" : "border-[var(--line)]"}`}
+      onClick={() => (selectMode ? (pickable ? onToggle?.(item.id) : undefined) : openDrawer(item.id))}
+      className={`cv-auto group pop-in relative cursor-default rounded-2xl border bg-[var(--bg-elev)] p-4 transition-colors hover:border-[var(--accent)]/50 ${selected || checked ? "border-[var(--accent)]" : "border-[var(--line)]"} ${selectMode && !pickable ? "opacity-50" : ""}`}
     >
-      <DeleteItemButton id={item.id} className="absolute right-2 top-2 z-10 bg-[var(--bg-elev)]/90 shadow-sm" />
+      {selectMode ? (
+        pickable && <input type="checkbox" className="absolute right-3 top-3 z-10 h-4 w-4" checked={!!checked} onChange={() => onToggle?.(item.id)} onClick={(e) => e.stopPropagation()} aria-label="选择这条笔记" />
+      ) : (
+        <DeleteItemButton id={item.id} className="absolute right-2 top-2 z-10 bg-[var(--bg-elev)]/90 shadow-sm" />
+      )}
+      {item.kind === "note" && item.title && <div className="mb-1 pr-8 text-[14.5px] font-semibold">{item.title}</div>}
       {item.kind === "image" && (
         <div className="mb-3 overflow-hidden rounded-xl bg-[var(--bg-soft)]">
           {url ? <img src={url} alt={item.originalName ?? ""} loading="lazy" className="max-h-64 w-full object-contain" /> : <div className="flex h-24 items-center justify-center text-[var(--fg-faint)]"><ImageIcon size={24} /></div>}
@@ -60,6 +77,15 @@ export const ItemCard = memo(function ItemCard({ item, onTag, selected }: { item
           <button key={t} className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] text-[var(--accent)] hover:brightness-110" onClick={(e) => { e.stopPropagation(); onTag(t); }}>#{t}</button>
         ))}
         {item.category && <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--fg-dim)]">{item.category}</span>}
+        {!selectMode && peers && peers.length > 0 && onMerge && (
+          <button
+            className="flex items-center gap-1 rounded-full border border-[var(--accent)]/40 px-2 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--accent-soft)]"
+            title="发现内容高度相似的碎片,可以让 AI 归并成一条主题笔记"
+            onClick={(e) => { e.stopPropagation(); onMerge([item.id, ...peers]); }}
+          >
+            <SparkleIcon size={11} />可整理 · {peers.length} 条相似
+          </button>
+        )}
         <span className="ml-auto flex items-center gap-2">
           <StatusChip item={item} />
           <span className="text-[11px] text-[var(--fg-faint)]">{fmtTime(item.createdAt)}</span>

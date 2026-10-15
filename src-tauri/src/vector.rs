@@ -273,6 +273,29 @@ impl VectorIndex {
         }
     }
 
+    /// 取一批记录的"中心向量"(各切片向量的平均再归一化),用于判断记录间的整体相似度
+    ///
+    /// 参数: item_ids 记录 id
+    /// 返回: id -> (知识库 id, 归一化中心向量);不在索引里的记录不返回
+    pub fn centroids_of(&self, item_ids: &[i64]) -> HashMap<i64, (i64, Vec<f32>)> {
+        let g = self.inner.read().unwrap();
+        let mut out = HashMap::new();
+        for id in item_ids {
+            let Some(b) = g.items.get(id) else { continue };
+            let mut acc = vec![0f32; b.dim];
+            for row in b.data.chunks_exact(b.dim) {
+                for (a, x) in acc.iter_mut().zip(row) {
+                    *a += x;
+                }
+            }
+            normalize(&mut acc);
+            if is_valid(&acc) {
+                out.insert(*id, (b.kb_id, acc));
+            }
+        }
+        out
+    }
+
     /// 移除某条记录
     pub fn remove_item(&self, item_id: i64) {
         self.inner.write().unwrap().items.remove(&item_id);

@@ -21,6 +21,7 @@ pub mod model_fetch;
 pub mod ocr_worker;
 pub mod ollama;
 pub mod openai;
+pub mod organize;
 pub mod pdf_ingest;
 pub mod pdf_native;
 pub mod pipeline;
@@ -135,6 +136,13 @@ pub fn run() {
             commands::get_session_messages,
             commands::delete_session,
             commands::fix_mermaid,
+            commands::organize_propose,
+            commands::organize_apply,
+            commands::organize_undo,
+            commands::organize_suggest,
+            commands::organize_hints,
+            commands::organize_merge_propose,
+            commands::organize_merge_apply,
             commands::write_export,
             commands::export_backup,
             commands::show_main,

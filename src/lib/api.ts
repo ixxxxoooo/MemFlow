@@ -4,7 +4,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus, CaptureResult, ChatEvent, ChatModelOption, ItemDetail, ItemFilter, Item, PullProgress,
-  Kb, MoveResult, RerankModel, Session, Settings, StoredMessage, TagCount,
+  GroupSuggestion, Kb, MergeProposal, MoveResult, SingleProposal, RerankModel, Session, Settings, StoredMessage, TagCount,
 } from "./types";
 
 /** 调用后端命令,把字符串错误统一包装成 Error */
@@ -87,6 +87,19 @@ export const api = {
   listSessions: () => call<Session[]>("list_sessions"),
   getSessionMessages: (sessionId: number) => call<StoredMessage[]>("get_session_messages", { sessionId }),
   deleteSession: (sessionId: number) => call<void>("delete_session", { sessionId }),
+  /** AI 整理:只生成方案供预览,不写入 */
+  organizePropose: (id: number, modelRef: string | null) => call<SingleProposal>("organize_propose", { id, modelRef }),
+  organizeApply: (id: number, title: string, content: string, baseUpdatedAt: number) =>
+    call<void>("organize_apply", { id, title, content, baseUpdatedAt }),
+  organizeUndo: (id: number) => call<void>("organize_undo", { id }),
+  /** 按向量相似度给出可归并的碎片分组(不调用模型) */
+  organizeSuggest: (kbId: number | null) => call<GroupSuggestion[]>("organize_suggest", { options: { kbId } }),
+  /** "可整理"提示:记录 id -> 高度相似的碎片 id */
+  organizeHints: (ids: number[]) => call<Record<string, number[]>>("organize_hints", { ids }),
+  organizeMergePropose: (ids: number[], modelRef: string | null) =>
+    call<MergeProposal>("organize_merge_propose", { ids, modelRef }),
+  organizeMergeApply: (ids: number[], title: string, content: string) =>
+    call<number>("organize_merge_apply", { ids, title, content }),
   fixMermaid: (code: string, error: string) => call<string>("fix_mermaid", { code, error }),
   writeExport: (path: string, dataBase64: string) => call<void>("write_export", { path, dataBase64 }),
   exportBackup: (destDir: string) => call<string>("export_backup", { destDir }),

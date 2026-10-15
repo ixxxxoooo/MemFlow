@@ -67,6 +67,12 @@ pub struct ItemDetail {
     pub images: Vec<repo::LinkedImage>,
     /// 图片被哪些文档引用
     pub parents: Vec<repo::ParentRef>,
+    /// AI 整理的修订历史(新的在前),非空时可撤销
+    pub revisions: Vec<repo::RevisionView>,
+    /// 归并产物引用的来源笔记(按编号)
+    pub merged_sources: Vec<repo::NoteBrief>,
+    /// 本笔记已被归并到哪些主题笔记
+    pub merged_into: Vec<repo::NoteBrief>,
 }
 
 /// 获取应用状态(Ollama、模型、统计、队列、设置)
@@ -374,6 +380,78 @@ pub fn move_items(core: S<'_>, ids: Vec<i64>, kb_id: i64) -> Result<crate::kb::M
     crate::kb::move_items(&core, &ids, kb_id)
 }
 
+/// 生成单条笔记的 AI 整理方案(只预览,不写入)
+#[tauri::command]
+pub async fn organize_propose(
+    core: S<'_>,
+    id: i64,
+    model_ref: Option<String>,
+) -> Result<crate::organize::SingleProposal> {
+    let core = core.inner().clone();
+    crate::organize::propose_single(&core, id, model_ref.as_deref()).await
+}
+
+/// 确认单条整理(覆盖原文,旧版本进入修订历史)
+#[tauri::command]
+pub fn organize_apply(
+    core: S<'_>,
+    id: i64,
+    title: String,
+    content: String,
+    base_updated_at: i64,
+) -> Result<()> {
+    let core = core.inner().clone();
+    crate::organize::apply_single(&core, id, &title, &content, base_updated_at)
+}
+
+/// 撤销最近一次 AI 整理
+#[tauri::command]
+pub fn organize_undo(core: S<'_>, id: i64) -> Result<()> {
+    let core = core.inner().clone();
+    crate::organize::undo_single(&core, id)
+}
+
+/// 按向量相似度给出可归并的碎片分组(不调用模型)
+#[tauri::command]
+pub fn organize_suggest(
+    core: S<'_>,
+    options: Option<crate::organize::GroupOptions>,
+) -> Result<Vec<crate::organize::GroupSuggestion>> {
+    crate::organize::suggest_groups(&core, &options.unwrap_or_default())
+}
+
+/// "可整理"提示:每条记录对应的高度相似碎片
+#[tauri::command]
+pub fn organize_hints(
+    core: S<'_>,
+    ids: Vec<i64>,
+) -> Result<std::collections::HashMap<i64, Vec<i64>>> {
+    crate::organize::peer_hints(&core, &ids)
+}
+
+/// 生成归并方案(一次模型调用,只预览,不写入)
+#[tauri::command]
+pub async fn organize_merge_propose(
+    core: S<'_>,
+    ids: Vec<i64>,
+    model_ref: Option<String>,
+) -> Result<crate::organize::MergeProposal> {
+    let core = core.inner().clone();
+    crate::organize::propose_merge(&core, &ids, model_ref.as_deref()).await
+}
+
+/// 确认归并:新建主题笔记并关联来源,返回新笔记 id
+#[tauri::command]
+pub fn organize_merge_apply(
+    core: S<'_>,
+    ids: Vec<i64>,
+    title: String,
+    content: String,
+) -> Result<i64> {
+    let core = core.inner().clone();
+    crate::organize::apply_merge(&core, &ids, &title, &content)
+}
+
 /// 闪念提交(文字/图片/文档)
 #[tauri::command]
 pub async fn capture_submit(core: S<'_>, input: CaptureInput) -> Result<CaptureResult> {
@@ -409,11 +487,17 @@ pub fn get_item(core: S<'_>, id: i64) -> Result<ItemDetail> {
         let chunks = repo::list_chunks(c, id)?;
         let images = repo::images_of(c, id)?;
         let parents = repo::parents_of(c, id)?;
+        let revisions = repo::list_revisions(c, id)?;
+        let merged_sources = repo::merged_sources(c, id)?;
+        let merged_into = repo::merged_into(c, id)?;
         Ok(ItemDetail {
             item,
             chunks,
             images,
             parents,
+            revisions,
+            merged_sources,
+            merged_into,
         })
     })
 }

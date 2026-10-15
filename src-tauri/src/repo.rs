@@ -1097,6 +1097,164 @@ pub fn count_attachment_refs(c: &Connection, path: &str) -> Result<i64> {
     )?)
 }
 
+// ---------- AI 整理:修订历史与归并关系 ----------
+
+/// 一条修订记录(列表展示用,不含正文)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionView {
+    pub id: i64,
+    pub reason: String,
+    pub created_at: i64,
+    /// 被保存旧版本的字数
+    pub content_length: i64,
+}
+
+/// 保存一个旧版本(覆盖原文前调用)
+pub fn add_revision(
+    c: &Connection,
+    item_id: i64,
+    title: Option<&str>,
+    content: &str,
+    reason: &str,
+) -> Result<i64> {
+    c.execute(
+        "INSERT INTO item_revisions(item_id,title,content,reason,created_at) VALUES(?1,?2,?3,?4,?5)",
+        params![item_id, title, content, reason, now_ms()],
+    )?;
+    Ok(c.last_insert_rowid())
+}
+
+/// 某记录的修订列表(新的在前)
+pub fn list_revisions(c: &Connection, item_id: i64) -> Result<Vec<RevisionView>> {
+    let mut stmt = c.prepare_cached(
+        "SELECT id, reason, created_at, length(content) FROM item_revisions WHERE item_id = ?1 ORDER BY id DESC",
+    )?;
+    let rows = stmt.query_map([item_id], |r| {
+        Ok(RevisionView {
+            id: r.get(0)?,
+            reason: r.get(1)?,
+            created_at: r.get(2)?,
+            content_length: r.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 取出并删除最近一次修订(撤销用)
+///
+/// 返回: (标题, 正文);没有修订返回 None
+pub fn pop_latest_revision(
+    c: &Connection,
+    item_id: i64,
+) -> Result<Option<(Option<String>, String)>> {
+    let row: Option<(i64, Option<String>, String)> = c
+        .query_row(
+            "SELECT id, title, content FROM item_revisions WHERE item_id = ?1 ORDER BY id DESC LIMIT 1",
+            [item_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((rid, title, content)) = row else {
+        return Ok(None);
+    };
+    c.execute("DELETE FROM item_revisions WHERE id = ?1", [rid])?;
+    Ok(Some((title, content)))
+}
+
+/// 原样写入标题与原文(标题允许置空,撤销时使用)
+pub fn set_item_text_exact(
+    c: &Connection,
+    id: i64,
+    title: Option<&str>,
+    content: &str,
+) -> Result<()> {
+    c.execute(
+        "UPDATE items SET title = ?2, content = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, title, content, now_ms()],
+    )?;
+    Ok(())
+}
+
+/// 笔记简要信息(归并候选与来源列表)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteBrief {
+    pub id: i64,
+    pub kb_id: i64,
+    pub title: Option<String>,
+    /// 原文前 120 字
+    pub preview: String,
+    pub created_at: i64,
+}
+
+fn map_brief(r: &Row) -> rusqlite::Result<NoteBrief> {
+    Ok(NoteBrief {
+        id: r.get(0)?,
+        kb_id: r.get(1)?,
+        title: r.get(2)?,
+        preview: r.get(3)?,
+        created_at: r.get(4)?,
+    })
+}
+
+/// 可参与归并的笔记:已处理完成、尚未整理/归并过、不是归并产物
+///
+/// 参数: kb_id 限定知识库(None 为全部);since_ms 只取该时间之后创建的
+pub fn organize_candidates(
+    c: &Connection,
+    kb_id: Option<i64>,
+    since_ms: i64,
+) -> Result<Vec<NoteBrief>> {
+    let mut stmt = c.prepare(
+        "SELECT i.id, i.kb_id, i.title, substr(i.content,1,120), i.created_at FROM items i \
+         WHERE i.kind = 'note' AND i.status = 'done' AND i.created_at >= ?1 \
+           AND (?2 IS NULL OR i.kb_id = ?2) \
+           AND NOT EXISTS (SELECT 1 FROM item_links l WHERE l.relation = 'merged_from' \
+                           AND (l.child_id = i.id OR l.parent_id = i.id)) \
+           AND NOT EXISTS (SELECT 1 FROM item_revisions r WHERE r.item_id = i.id) \
+         ORDER BY i.created_at DESC LIMIT 2000",
+    )?;
+    let rows = stmt.query_map(params![since_ms, kb_id], map_brief)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 按 id 取笔记简要信息(保持传入顺序,忽略不存在的)
+pub fn note_briefs(c: &Connection, ids: &[i64]) -> Result<Vec<NoteBrief>> {
+    let mut out = Vec::new();
+    for id in ids {
+        let b = c
+            .query_row(
+                "SELECT i.id, i.kb_id, i.title, substr(i.content,1,120), i.created_at FROM items i WHERE i.id = ?1",
+                [id],
+                map_brief,
+            )
+            .optional()?;
+        out.extend(b);
+    }
+    Ok(out)
+}
+
+/// 归并产物引用的来源记录(按序号)
+pub fn merged_sources(c: &Connection, parent: i64) -> Result<Vec<NoteBrief>> {
+    let mut stmt = c.prepare_cached(
+        "SELECT i.id, i.kb_id, i.title, substr(i.content,1,120), i.created_at FROM item_links l \
+         JOIN items i ON i.id = l.child_id WHERE l.parent_id = ?1 AND l.relation = 'merged_from' ORDER BY l.seq",
+    )?;
+    let rows = stmt.query_map([parent], map_brief)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 某条记录已被归并到哪些主题笔记
+pub fn merged_into(c: &Connection, child: i64) -> Result<Vec<NoteBrief>> {
+    let mut stmt = c.prepare_cached(
+        "SELECT i.id, i.kb_id, i.title, substr(i.content,1,120), i.created_at FROM item_links l \
+         JOIN items i ON i.id = l.parent_id WHERE l.child_id = ?1 AND l.relation = 'merged_from' ORDER BY i.id",
+    )?;
+    let rows = stmt.query_map([child], map_brief)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

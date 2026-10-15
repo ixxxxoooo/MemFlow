@@ -99,6 +99,61 @@ export interface ItemDetail {
   images: LinkedImage[];
   /** 图片被哪些文档引用 */
   parents: ParentRef[];
+  /** AI 整理的修订历史(新的在前),非空时可撤销 */
+  revisions: Revision[];
+  /** 归并产物引用的来源笔记(按编号) */
+  mergedSources: NoteBrief[];
+  /** 本笔记已被归并到哪些主题笔记 */
+  mergedInto: NoteBrief[];
+}
+
+export interface Revision {
+  id: number;
+  reason: string;
+  createdAt: number;
+  contentLength: number;
+}
+
+/** 笔记简要信息(归并来源/候选) */
+export interface NoteBrief {
+  id: number;
+  kbId: number;
+  title: string | null;
+  preview: string;
+  createdAt: number;
+}
+
+/** 单条整理方案 */
+export interface SingleProposal {
+  itemId: number;
+  baseUpdatedAt: number;
+  originalTitle: string | null;
+  originalContent: string;
+  title: string;
+  content: string;
+  notes: string[];
+  warnings: string[];
+  model: string;
+  cloud: boolean;
+}
+
+/** 归并方案;ids 的顺序即 [1][2]… 的编号 */
+export interface MergeProposal {
+  ids: number[];
+  sources: NoteBrief[];
+  title: string;
+  content: string;
+  notes: string[];
+  warnings: string[];
+  model: string;
+  cloud: boolean;
+}
+
+/** 聚类建议的一组碎片 */
+export interface GroupSuggestion {
+  ids: number[];
+  items: NoteBrief[];
+  avgSimilarity: number;
 }
 
 export interface ItemFilter {

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// 当前最新的数据库版本
-pub const LATEST_VERSION: i64 = 5;
+pub const LATEST_VERSION: i64 = 6;
 
 /// 只读连接池大小
 const READ_POOL_SIZE: usize = 4;
@@ -158,6 +158,18 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY(chunk_id, image_item_id)
     );
     CREATE INDEX idx_chunk_images_img ON chunk_images(image_item_id);
+    "#,
+    // v6:AI 整理的修订历史。整理覆盖原文前先把旧版本存进来,支持撤销;随记录一起删除
+    r#"
+    CREATE TABLE item_revisions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        title TEXT,
+        content TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_revisions_item ON item_revisions(item_id, id);
     "#,
 ];
 

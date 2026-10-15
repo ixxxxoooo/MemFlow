@@ -7,9 +7,10 @@ import { fmtDayLabel, groupBy } from "../../lib/format";
 import { useKb } from "../../lib/kbStore";
 import { useApp } from "../../lib/store";
 import type { Item, TagCount } from "../../lib/types";
-import { CloseIcon, SearchIcon } from "../components/icons";
+import { CloseIcon, SearchIcon, SparkleIcon } from "../components/icons";
 import { ItemCard } from "../components/ItemCard";
 import { filterTags, foldTags } from "../../lib/tagFold";
+import { mergeCountOk, useOrganize } from "../../lib/organize";
 
 const PAGE = 40;
 
@@ -27,6 +28,13 @@ export function TimelineView() {
   const current = useKb((s) => s.current);
   const [moreOpen, setMoreOpen] = useState(false);
   const [tagQuery, setTagQuery] = useState("");
+  // 多选(用于 AI 归并)与"可整理"提示
+  const [selectMode, setSelectMode] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [hints, setHints] = useState<Record<string, number[]>>({});
+  const { openMerge, openSuggest } = useOrganize();
+  const toggle = useCallback((id: number) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }), []);
+  const exitSelect = () => { setSelectMode(false); setPicked(new Set()); };
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 250);
@@ -63,6 +71,15 @@ export function TimelineView() {
   }, [hasMore, items.length]);
   useEffect(() => { api.listTags().then(setTags).catch(() => undefined); }, [dataVersion]);
 
+  // 已处理完的笔记:向后端询问是否有高度相似的碎片(只用已有向量,不调用模型)
+  useEffect(() => {
+    const ids = items.filter((i) => i.kind === "note" && i.status === "done").slice(0, 80).map((i) => i.id);
+    if (ids.length === 0) { setHints({}); return; }
+    let alive = true;
+    api.organizeHints(ids).then((h) => { if (alive) setHints(h); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [items, dataVersion]);
+
   const groups = groupBy(items, (i) => fmtDayLabel(i.createdAt));
   const failed = status?.queue.failed ?? 0;
   const folded = foldTags(tags, tag, 7);
@@ -76,6 +93,8 @@ export function TimelineView() {
         <h2 className="text-[15px] font-semibold" data-tauri-drag-region>记忆时间流</h2>
         <span className="text-xs text-[var(--fg-faint)]" data-tauri-drag-region>共 {status?.stats.notes ?? 0} 条记录 · {status?.stats.images ?? 0} 张图片</span>
         <div className="flex-1" data-tauri-drag-region />
+        <button className="btn btn-secondary" title="找出最近相近的零散记录,让 AI 合并成主题笔记" onClick={openSuggest}><SparkleIcon size={13} />整理碎片</button>
+        <button className={`btn ${selectMode ? "btn-primary" : "btn-secondary"}`} title="选择多条笔记后 AI 归并" onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}>{selectMode ? "完成选择" : "选择"}</button>
         {failed > 0 && (
           <button className="rounded-lg bg-[var(--err)]/10 px-3 py-1 text-xs text-[var(--err)]" onClick={async () => { try { const n = await api.retryFailed(null); toast(`已重新排队 ${n} 项`, "ok"); bumpData(); void refreshStatus(); } catch (e) { toast((e as Error).message, "err"); } }}>
             重试 {failed} 项失败
@@ -139,7 +158,19 @@ export function TimelineView() {
             <section key={g.key} className="mb-6">
               <div className="sticky top-0 z-10 -mx-1 mb-2 bg-[var(--bg)]/85 px-1 py-1.5 text-xs font-medium text-[var(--fg-dim)] backdrop-blur">{g.key}</div>
               <div className="flex flex-col gap-3">
-                {g.items.map((it) => <ItemCard key={it.id} item={it} selected={drawer?.itemId === it.id} onTag={setTag} />)}
+                {g.items.map((it) => (
+                  <ItemCard
+                    key={it.id}
+                    item={it}
+                    selected={drawer?.itemId === it.id}
+                    onTag={setTag}
+                    selectMode={selectMode}
+                    checked={picked.has(it.id)}
+                    onToggle={toggle}
+                    peers={hints[String(it.id)]}
+                    onMerge={openMerge}
+                  />
+                ))}
               </div>
             </section>
           ))}
@@ -152,6 +183,21 @@ export function TimelineView() {
           )}
         </div>
       </div>
+
+      {selectMode && (
+        <div className="flex shrink-0 items-center gap-3 border-t border-[var(--line)] bg-[var(--bg)] px-6 py-2.5 text-xs">
+          <span className="text-[var(--fg-dim)]">已选 {picked.size} 条文字笔记{picked.size > 0 && !mergeCountOk(picked.size) ? "(归并需要 2–12 条)" : ""}</span>
+          <div className="flex-1" />
+          <button className="btn btn-ghost" onClick={exitSelect}>取消</button>
+          <button
+            className="btn btn-primary"
+            disabled={!mergeCountOk(picked.size)}
+            onClick={() => { const ids = [...picked]; exitSelect(); openMerge(ids); }}
+          >
+            <SparkleIcon size={13} />AI 归并
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -75,6 +75,27 @@ async fn chat_handler(State(st): State<Arc<MockState>>, Json(body): Json<Value>)
             json!({"message": {"role": "assistant", "content": "画面描述:一张示意图"}, "done": true}),
         );
     }
+    // AI 整理:单条整理回显原文(带"整理:"前缀);含"改数字"时故意篡改数字;归并返回带来源编号的固定结果
+    if user.starts_with("【整理单条】") {
+        let text = user.split("原文:\n").nth(1).unwrap_or("").to_string();
+        let text = if text.contains("改数字") {
+            text.replace("20", "25")
+        } else {
+            text
+        };
+        let content = json!({"title": "整理后标题", "content": format!("整理:{text}"), "notes": ["日期不明确"]}).to_string();
+        return json_resp(
+            json!({"message": {"role": "assistant", "content": content}, "done": true}),
+        );
+    }
+    if user.starts_with("【归并】") {
+        let content =
+            json!({"title": "A项目预算", "content": "A项目预算缩减20%[1][2][9]", "notes": []})
+                .to_string();
+        return json_resp(
+            json!({"message": {"role": "assistant", "content": content}, "done": true}),
+        );
+    }
     if body.get("format").is_some() {
         let text: String = user
             .split("内容:")

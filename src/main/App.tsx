@@ -12,6 +12,7 @@ import type { QueueStatus } from "../lib/types";
 import { UploadIcon } from "./components/icons";
 import { DocModal } from "./components/DocModal";
 import { ItemDrawer } from "./components/ItemDrawer";
+import { OrganizeDialog } from "./components/OrganizeDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBanner } from "./components/StatusBanner";
 import { Toasts } from "./components/Toasts";
@@ -100,6 +101,7 @@ export function App() {
       </main>
       {drawer && view !== "settings" && <ItemDrawer />}
       <DocModal />
+      <OrganizeDialog />
       <Toasts />
     </div>
   );

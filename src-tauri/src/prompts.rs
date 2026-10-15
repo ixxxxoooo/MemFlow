@@ -214,6 +214,89 @@ pub fn mermaid_fix_messages(code: &str, error: &str) -> Vec<ChatMessage> {
     ]
 }
 
+/// AI 整理的结构化输出(单条整理与归并共用)
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OrganizeOutput {
+    /// 标题(20 字以内)
+    #[serde(default)]
+    pub title: String,
+    /// 整理后的 Markdown 正文
+    #[serde(default)]
+    pub content: String,
+    /// 模型认为不确定、需要用户核对的地方
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+/// AI 整理的 JSON Schema
+pub fn organize_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "content": {"type": "string"},
+            "notes": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["title", "content", "notes"]
+    })
+}
+
+/// 单条整理用户消息的前缀(测试里的 mock 靠它识别请求类型)
+pub const ORGANIZE_SINGLE_TAG: &str = "【整理单条】";
+/// 归并用户消息的前缀
+pub const ORGANIZE_MERGE_TAG: &str = "【归并】";
+
+/// 构造"整理单条笔记"消息
+///
+/// 参数: today 今天日期;title 原标题(可空);content 原文
+/// 返回: 消息列表
+pub fn organize_note_messages(today: &str, title: &str, content: &str) -> Vec<ChatMessage> {
+    let system = format!(
+        "你是笔记整理助手。今天是 {today}。把用户零散的笔记整理成结构清晰、便于日后检索的 Markdown 笔记。严格遵守:\n\
+         1. 绝对不能添加原文没有的事实、数字、人名、结论或推测。\n\
+         2. 日期、数字、金额、人名、专有名词必须原样保留,不能改写或四舍五入。\n\
+         3. 原文含糊、矛盾或缺少信息的地方保持原样,并逐条写进 notes 提醒用户核对;不要自行补全。\n\
+         4. 可以调整结构:分段、加小标题、把并列信息改成列表、删除口语赘词和重复内容。\n\
+         5. 保持原文语言。title 用 20 字以内概括主题。\n\
+         只输出 JSON:{{\"title\":\"\",\"content\":\"\",\"notes\":[]}}。"
+    );
+    vec![
+        ChatMessage::new("system", system),
+        ChatMessage::new(
+            "user",
+            format!("{ORGANIZE_SINGLE_TAG}\n标题:{title}\n原文:\n{content}"),
+        ),
+    ]
+}
+
+/// 构造"归并多条碎片笔记"消息
+///
+/// 参数: today 今天日期;sources 按编号排列的来源(编号从 1 开始, 日期文案, 正文)
+/// 返回: 消息列表
+pub fn organize_merge_messages(
+    today: &str,
+    sources: &[(usize, String, String)],
+) -> Vec<ChatMessage> {
+    let system = format!(
+        "你是笔记整理助手。今天是 {today}。下面是同一主题的若干条零散笔记,每条有编号。把它们归并成一篇主题笔记(Markdown)。严格遵守:\n\
+         1. 只使用来源里出现的信息,绝对不能添加来源没有的事实、数字、人名、结论或推测。\n\
+         2. 日期、数字、金额、人名、专有名词必须原样保留。\n\
+         3. 每条结论或事实后面用 [编号] 标注来源,如 [1] 或 [2][3];只能使用给出的编号。\n\
+         4. 来源之间互相矛盾时,把两种说法都保留并分别标注来源,不要自行裁决;按时间先后体现变化。\n\
+         5. 信息含糊或不确定之处写进 notes,提醒用户核对。\n\
+         6. 保持来源语言。title 用 20 字以内概括主题。\n\
+         只输出 JSON:{{\"title\":\"\",\"content\":\"\",\"notes\":[]}}。"
+    );
+    let mut body = String::from(ORGANIZE_MERGE_TAG);
+    for (no, date, text) in sources {
+        body.push_str(&format!("\n\n[{no}] ({date})\n{text}"));
+    }
+    vec![
+        ChatMessage::new("system", system),
+        ChatMessage::new("user", body),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
