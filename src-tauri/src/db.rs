@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! SQLite 连接封装与版本化迁移。
 //!
 //! 设计要点:

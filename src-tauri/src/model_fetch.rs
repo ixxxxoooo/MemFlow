@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 直连下载 Ollama 模型:绕过 Ollama 服务端的重定向安全检查。
 //!
 //! 背景:代理工具(如 Quantumult X)开启 fake-ip 后,`ollama pull` 会因为 CDN 域名被解析到

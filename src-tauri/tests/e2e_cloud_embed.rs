@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 集成测试:向量模型与视觉模型选择云端(OpenAI 兼容 `/embeddings` 与多模态对话)。
 //! 用本地 mock 服务模拟:Ollama(文本提取)+ 云端向量接口 + 云端多模态对话接口。
 

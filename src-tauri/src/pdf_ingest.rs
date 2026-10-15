@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! PDF 入库解析:逐页读取文本层,扫描页走本机 OCR(PDFKit + Vision),
 //! 或按设置交给视觉模型逐页转 Markdown。输出带页边界标记(`chunker::PAGE_MARK`)的文本。
 //!

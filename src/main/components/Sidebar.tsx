@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 左栏:导航 + Ollama 状态呼吸灯 + 后台队列状态
 
 import { needsOllama } from "../../lib/modelSource";

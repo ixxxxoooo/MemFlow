@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 连接测试结果:成功显示绿色对号,失败显示红色叉与原因
 
 import { CheckIcon, CloseIcon } from "./icons";

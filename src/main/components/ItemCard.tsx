@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 时间流卡片:记录 / 图片,带 AI 标签与处理状态
 
 import { memo } from "react";

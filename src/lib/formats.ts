@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 导入支持的文件格式:文件对话框过滤器、界面提示、拖拽提示的唯一来源。
 // 必须与后端 `extract::classify` 保持一致(有单测对照 Rust 源码)。
 

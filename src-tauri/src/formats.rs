@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 办公与电子书格式的文本抽取:xlsx / csv / pptx / html / epub / rtf。
 //!
 //! 不引入重型解析库:这些格式本质是「zip + XML」或纯文本,用 `zip` 与正则即可稳定还原结构

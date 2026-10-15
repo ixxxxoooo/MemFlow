@@ -174,7 +174,7 @@ Tauri 2 多窗口(main / capsule / toast)+ Rust 后端 + React 19 前端。后�
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 ygw
+[MIT](LICENSE) © 2026 ixxxxoooo
 
 ---
 

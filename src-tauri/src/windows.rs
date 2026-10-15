@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 窗口管理:主工作台、闪念胶囊、托盘、全局快捷键、macOS 毛玻璃。
 
 use crate::error::{AppError, Result};

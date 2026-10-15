@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 模型品牌图标:未识别时显示通用占位,黑色单色图标在深色主题下自动反相
 
 import { BRAND_ICONS, brandOf, MONO_BRANDS } from "../../lib/brands";

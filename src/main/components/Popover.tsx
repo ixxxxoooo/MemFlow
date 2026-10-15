@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 锚定在触发元素旁的浮层(挂到 body,不会被表格/滚动容器裁切),点击外部或按 Esc 关闭
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";

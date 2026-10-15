@@ -1,6 +1,6 @@
 //! 真机端到端冒烟:依赖本机已安装 bge-m3 与 qwen2.5:7b。
 //! 运行:`cargo test --test e2e_real_ollama -- --ignored --nocapture`
-//! @author ygw
+//! @author ixxxxoooo
 
 use memflow_lib::chat::{self, ChatEvent};
 use memflow_lib::core::test_core;

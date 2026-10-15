@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! Tauri 命令层:对前端暴露的全部接口。所有参数做合法性校验,统一返回 Result。
 
 use crate::chat::{self, ChatEvent};

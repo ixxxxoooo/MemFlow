@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 对话模型选择器:输入框旁的下拉,列出本地已安装与已配置密钥的云端模型
 
 import { useEffect, useRef, useState } from "react";

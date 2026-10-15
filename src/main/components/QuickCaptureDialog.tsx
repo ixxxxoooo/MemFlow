@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 「记一笔」对话框:在主界面任何页面随手记一句话 / 粘贴截图 / 添加文件,存入默认知识库。
 // 与闪念胶囊共用 useCapture;窗口内拖入的文件由 App 转发为 `memflow-capture-files` 事件追加到这里。
 

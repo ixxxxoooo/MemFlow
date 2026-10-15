@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 应用核心上下文:聚合数据库、向量索引、设置、Ollama 客户端与事件通道。
 //! 与 Tauri 解耦(通过 EventSink 抽象),便于集成测试。
 

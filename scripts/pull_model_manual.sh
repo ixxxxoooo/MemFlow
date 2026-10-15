@@ -14,7 +14,7 @@
 # 原理: 用 curl 下载 manifest 与各 blob(断点续传),校验 sha256 后写入 ~/.ollama/models。
 # 只依赖 macOS 自带的 curl / shasum / grep,不需要 python。
 # 应用内设置页的「直连下载」按钮使用相同逻辑,一般无需手动运行本脚本。
-# @author ygw
+# @author ixxxxoooo
 set -euo pipefail
 
 ARG1="${1:?缺少模型名,例如: $0 qwen2.5:7b}"

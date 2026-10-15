@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 主窗口轻提示
 
 import { useApp } from "../../lib/store";

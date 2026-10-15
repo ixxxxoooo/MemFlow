@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // AI 整理对话框:本地模型直接生成、云端先提示隐私、确认时提交用户修改后的内容
 
 import { act } from "react";

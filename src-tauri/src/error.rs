@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 统一错误类型:区分"可无限重试的临时不可用"与"需要计次重试的业务错误"。
 
 use serde::{Serialize, Serializer};

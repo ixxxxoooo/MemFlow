@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 标签折叠:行内只展示最常用的若干个,其余收进"更多标签"浮层
 
 import type { TagCount } from "./types";

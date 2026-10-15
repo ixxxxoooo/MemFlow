@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 知识库管理:新建/重命名/删除、记录在知识库之间转移。
 //!
 //! 与 RAGFlow 的 dataset 概念对应:每个知识库是一个独立的检索范围。

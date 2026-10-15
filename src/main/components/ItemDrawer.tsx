@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 右栏溯源/详情抽屉:展示原始记录、原图、切片(高亮被引用的那一段)、AI 元数据;可编辑、重刷、删除
 
 import { convertFileSrc } from "@tauri-apps/api/core";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 import { describe, expect, it, vi } from "vitest";
 import { normalizeMermaid, renderWithRepair, withTimeout } from "./mermaidRepair";
 

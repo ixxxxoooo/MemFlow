@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 向量/视觉模型来源的纯逻辑:来源标识(与后端 Settings::embed_identity 保持一致)
 
 import type { Settings } from "./types";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! OCR 子进程:把 Vision 识别放到独立进程里执行。
 //!
 //! 背景:macOS 首次使用某个可执行文件做 Vision 识别时,系统要编译神经引擎模型(约 20 秒),

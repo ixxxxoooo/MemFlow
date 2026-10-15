@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! Ollama REST 客户端:状态检测、模型管理、向量化、对话(流式/结构化)、拉取与卸载。
 //!
 //! 健壮性约定:

@@ -1,7 +1,7 @@
 # OrbitBoard — 实时协作看板平台
 
 > 本目录为 **OrbitBoard** 项目的示例文档集,用于 MemFlow 导入与 RAG 检索测试。
-> @author ygw
+> @author ixxxxoooo
 
 ## 项目简介
 

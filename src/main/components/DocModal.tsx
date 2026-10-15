@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 文档弹窗:预览(Markdown 渲染)/ 切片列表 / 在线编辑(md 所见即所得,txt 纯文本),保存后自动快速重新索引
 
 import { convertFileSrc } from "@tauri-apps/api/core";

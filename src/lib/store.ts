@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 全局应用状态(视图、状态快照、详情抽屉、轻提示)
 
 import { create } from "zustand";

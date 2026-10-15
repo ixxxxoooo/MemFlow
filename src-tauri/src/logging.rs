@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 日志:按天滚动写入文件(保留 7 天),同时输出到终端;并接管 panic 与前端错误。
 
 use std::path::PathBuf;

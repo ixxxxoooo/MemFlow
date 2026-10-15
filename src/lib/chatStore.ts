@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 问答状态:会话、消息、流式输出(token 用 rAF 合并刷新,避免高频重渲染)
 
 import { create } from "zustand";

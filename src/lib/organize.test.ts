@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 import { describe, expect, it } from "vitest";
 import type { ChatModelOption, NoteBrief, Settings } from "./types";
 import { briefName, mergeCountOk, organizeModel, pct, refIsCloud, useOrganize } from "./organize";

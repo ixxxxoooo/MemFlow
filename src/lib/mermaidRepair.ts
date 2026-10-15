@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // Mermaid 校验与"自动修复"流程(纯函数,依赖通过参数注入以便测试)
 
 /** 去掉模型可能带上的代码围栏与 mermaid 语言标记 */

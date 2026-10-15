@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // Tauri 构建脚本;macOS 上额外编译 PDFKit/Vision 的 Objective-C 桥接(扫描版 PDF 的 OCR)
 
 fn main() {

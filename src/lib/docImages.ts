@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 文档预览里的图片:把正文中 `![](相对路径)` 的写法对应到导入时关联的图片记录
 
 import type { ImageRef, LinkedImage } from "./types";

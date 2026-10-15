@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 轻量线性图标集
 
 import type { ReactNode, SVGProps } from "react";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! OpenAI 兼容协议客户端(DeepSeek、通义、Kimi、智谱、硅基流动、OpenAI 等)。
 //!
 //! 覆盖三类调用:文本对话、向量化(`/embeddings`)、视觉(多模态消息,图片以 data URL 传入):

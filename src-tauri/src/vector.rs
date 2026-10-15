@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 内存向量索引:向量以 BLOB 存于 SQLite,启动时载入内存,用暴力余弦检索。
 //!
 //! 个人知识库规模(十万切片以内)毫秒级返回,且不依赖任何 SQLite 扩展。

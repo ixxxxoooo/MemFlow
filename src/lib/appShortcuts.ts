@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 应用内快捷键:⌘, 打开设置、⌘N 记一笔、⌘1/2/3 切换视图。全局唤起胶囊的快捷键见设置页。
 
 export type ShortcutAction = "settings" | "capture" | "chat" | "timeline" | "docs";

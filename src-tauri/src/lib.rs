@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! MemFlow:本地 AI 第二大脑(Tauri 2 + Rust 后端)。
 
 pub mod chat;

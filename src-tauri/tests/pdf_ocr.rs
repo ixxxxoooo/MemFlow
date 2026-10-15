@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! PDF 原生解析与 OCR 集成测试(仅 macOS:依赖 PDFKit + Vision)。
 
 #![cfg(target_os = "macos")]

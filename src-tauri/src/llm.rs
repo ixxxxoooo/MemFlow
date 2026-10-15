@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 文本对话后端的统一入口:按设置在本地 Ollama 与 OpenAI 兼容云端之间切换。
 //!
 //! 只覆盖"文本类"调用(问答、查询改写、结构化提取、Mermaid 修复)。

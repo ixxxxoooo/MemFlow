@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 集成测试公共设施:本地 mock Ollama(嵌入用字符二元组哈希,共享词越多越相似)。
 #![allow(dead_code)]
 

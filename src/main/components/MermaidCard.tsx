@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // Mermaid 流程图卡片:校验 → 自动修复 → 渲染;支持放大、查看代码、导出 SVG/PNG、复制代码
 
 import { save } from "@tauri-apps/plugin-dialog";

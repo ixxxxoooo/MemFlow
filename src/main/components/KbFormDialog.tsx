@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 新建 / 编辑知识库对话框:名称(必填)与描述(可选)
 
 import { useState } from "react";

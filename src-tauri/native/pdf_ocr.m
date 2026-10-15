@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // macOS 原生 PDF 读取与 OCR 桥接(PDFKit + Vision),通过 C ABI 暴露给 Rust。
 //
 // 约定:

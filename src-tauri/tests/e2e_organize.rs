@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! AI 整理集成测试:单条整理(预览/确认/撤销/过期保护)、向量聚类、归并(来源关系/引用校验/可检索)。
 
 mod common;

@@ -1,6 +1,6 @@
 # MemFlow:本地 AI 第二大脑
 
-> @author ygw　　日期:2026-10-15
+> @author ixxxxoooo　　日期:2026-10-15
 
 ## 一、产品定位
 

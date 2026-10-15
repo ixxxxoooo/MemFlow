@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 设置页:模型、检索、快捷键、数据与备份
 
 import { open } from "@tauri-apps/plugin-dialog";

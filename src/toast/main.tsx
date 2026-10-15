@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 屏幕右下角的轻量提示(由 Rust 控制显示与自动隐藏)
 
 import { listen } from "@tauri-apps/api/event";

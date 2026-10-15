@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 知识库详情(档案库第二级):库内文档列表、导入文件/文件夹、选中重刷 / 转移 / 删除、切片状态
 
 import { open } from "@tauri-apps/plugin-dialog";

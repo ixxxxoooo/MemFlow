@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 「记一笔」:存入默认知识库、拖入文件作为附件、无内容不可保存、失败时保留草稿
 
 import { act } from "react";

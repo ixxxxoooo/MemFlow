@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 关联图片的缩略图条:切片/引用来源里出现的插图,点击在右栏打开图片详情
 
 import { useApp } from "../../lib/store";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 放大查看的滚轮语义(纯函数):普通滚轮平移,⌘/Ctrl+滚轮(含触控板捏合)缩放
 
 export interface WheelLike {

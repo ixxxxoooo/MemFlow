@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 查询向量 LRU 缓存:同一问题(如重试、追问改写后相同)免去一次向量化往返。
 
 use std::collections::{HashMap, VecDeque};

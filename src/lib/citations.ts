@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 引用角标处理:把正文里的 [n] 转成可点击的链接(代码块内保持原样)
 
 /** 把代码块之外的 [n] 替换为 [n](cite:n) 形式的 Markdown 链接 */

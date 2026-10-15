@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 问答范围选择器:放在输入框左上角上方的小胶囊,点开多选知识库;一个都不选 = 搜索全部
 
 import { useRef, useState } from "react";

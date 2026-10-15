@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 展示格式化与小工具
 
 /** 把毫秒时间戳格式化为 "HH:mm" */

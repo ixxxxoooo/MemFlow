@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 import { describe, expect, it } from "vitest";
 import { dropTargetKb, normalizeScope, scopeLabel, toggleScope } from "./kbScope";
 import type { Kb } from "./types";

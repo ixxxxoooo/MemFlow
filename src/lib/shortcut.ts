@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 把键盘事件转成 Tauri 全局快捷键字符串(如 CommandOrControl+Shift+K)
 
 /** 返回快捷键字符串;只按了修饰键或没有修饰键时返回 null */

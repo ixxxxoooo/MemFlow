@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 闪念胶囊:全局唤起的极简输入框。回车即保存并收起;支持粘贴截图、拖入文件。
 
 import { listen } from "@tauri-apps/api/event";

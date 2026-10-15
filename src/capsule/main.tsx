@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 闪念胶囊入口
 
 import { StrictMode } from "react";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 模型品牌识别:根据模型名 / 云端预设 / 来源挑选图标,识别不出时回退到来源图标
 
 import baichuan from "../assets/brands/baichuan-color.svg";

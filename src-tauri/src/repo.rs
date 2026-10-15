@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 数据访问层:记录、元数据、切片、设置、对话的 SQL 封装。
 
 use crate::db::{now_ms, DEFAULT_KB_ID};

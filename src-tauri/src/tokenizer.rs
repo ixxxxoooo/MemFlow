@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 中文分词:FTS5 默认分词器无法处理中文,这里用 jieba 预分词后写入/查询。
 //!
 //! - 索引时使用搜索引擎模式(cut_for_search),召回更全

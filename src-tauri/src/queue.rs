@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 持久化任务队列与并发 Worker。
 //!
 //! - 任务存于 SQLite,应用崩溃/重启后自动恢复

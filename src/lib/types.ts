@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 与 Rust 后端一一对应的类型定义
 
 export type ItemKind = "note" | "image" | "document";

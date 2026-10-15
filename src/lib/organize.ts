@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // AI 整理相关的纯函数与对话框状态(仅状态,界面在 OrganizeDialog)
 
 import { create } from "zustand";

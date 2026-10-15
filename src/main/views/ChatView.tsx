@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // AI 问答视图:对话流 + 流式输出 + 来源角标 + 历史会话
 
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 原生 PDF 读取与 OCR:macOS 通过 PDFKit + Vision(见 `native/pdf_ocr.m`),其它平台为空实现。
 //!
 //! `PdfDoc` 不是线程安全的:一个实例只应在同一时刻被一个线程使用(外层用 Mutex 保证)。

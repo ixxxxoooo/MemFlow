@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 本地重排序模型的下载控件:显示安装状态、下载进度与取消
 
 import { api } from "../../lib/api";

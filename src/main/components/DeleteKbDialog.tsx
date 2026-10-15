@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 删除知识库对话框:选择库内记录的去向(转移到默认库或连同记录删除)
 
 import { useState } from "react";

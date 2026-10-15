@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 导入结果的汇总文案:导入 N、重复 M、跳过 K(含原因)
 
 import type { CaptureResult } from "./types";

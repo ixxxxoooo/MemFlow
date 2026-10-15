@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 对话可选模型:本地 Ollama 已安装的文本模型 + 云端档案(默认云端配置与额外档案)。
 //!
 //! 引用格式(`ref`):

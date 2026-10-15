@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // Markdown 回归:sources/onCite/streaming 变化时,流程图节点不得被卸载重建(曾导致闪烁与一直渲染中)
 
 import { act } from "react";

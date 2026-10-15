@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 待保存的附件小卡片(图片缩略图 / 文件图标),悬浮时显示移除按钮
 
 import type { Attach } from "../../lib/useCapture";

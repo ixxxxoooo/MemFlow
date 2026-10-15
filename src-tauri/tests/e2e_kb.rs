@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 多知识库集成测试:检索隔离、范围记忆、拒答文案、转移后检索同步、库内去重、删库。
 
 mod common;

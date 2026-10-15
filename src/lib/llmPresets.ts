@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 云端模型预设:均为 OpenAI 兼容协议,实际请求地址为 `{baseUrl}/chat/completions`
 
 export interface LlmPreset {

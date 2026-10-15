@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 前端到 Rust 后端的调用封装(统一错误为 Error 对象)
 
 import { Channel, invoke } from "@tauri-apps/api/core";

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 所有提示词与结构化输出 Schema 集中管理。修改提示词时需递增 PROMPT_VERSION,
 //! 以便"重刷"能识别哪些记录由旧版提示词生成。
 

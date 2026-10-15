@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 模型下载控件:普通下载(经 Ollama)与直连下载(绕过代理 fake-ip 拦截),带进度与取消
 
 import { api } from "../../lib/api";

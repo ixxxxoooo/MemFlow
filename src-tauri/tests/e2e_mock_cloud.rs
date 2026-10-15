@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 集成测试:云端 OpenAI 兼容模型(如 DeepSeek)与模型直连下载。
 //! 用本地 mock 服务模拟:Ollama(仅向量化)+ OpenAI 兼容对话接口 + Ollama 模型仓库。
 

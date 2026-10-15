@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 文件类型识别与文本抽取(PDF / Markdown / TXT / DOCX / PPTX / XLSX / CSV / HTML / EPUB / RTF)。
 //!
 //! 解析在阻塞线程中执行,带 panic 捕获与超时,避免坏文件拖垮应用。

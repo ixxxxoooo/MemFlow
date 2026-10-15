@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 知识库范围相关的纯函数:问答范围规整与展示、拖拽/导入目标选择
 
 import type { Kb } from "./types";

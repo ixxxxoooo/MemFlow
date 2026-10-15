@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 集成测试:用本地 mock Ollama 服务验证完整链路
 //! 录入 → 解析 → 向量化 → 检索 → 问答 → 重刷 → 降级 → 模型切换,无需真实模型。
 

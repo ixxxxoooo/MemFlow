@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 版面还原:把 OCR 行(带坐标)或 PDF 文本层的“视觉行”整理成结构化 Markdown。
 //!
 //! 纯逻辑模块,不依赖平台,便于单元测试:

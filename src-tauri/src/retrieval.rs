@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 混合检索:向量相似度 + FTS5 全文(jieba 分词)+ RRF 融合 + 时间衰减。
 //!
 //! 健壮性:

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 文档类型判断:决定弹窗里的渲染方式与是否可编辑
 
 export type DocEditMode = "wysiwyg" | "plain" | "none";

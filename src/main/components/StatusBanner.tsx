@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 顶部引导条:Ollama 未运行 / 缺少模型 / 云端密钥未配置 / 向量模型更换需重刷
 
 import { needsOllama } from "../../lib/modelSource";

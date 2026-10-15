@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 本地 ONNX 重排序:对混合检索召回的候选 (问题, 片段) 逐对打分,提升排序精度。
 //!
 //! 为什么自带模型:Ollama 没有 `/api/rerank` 接口。这里用 `fastembed` 加载量化后的

@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 应用设置:以单行 JSON 存入 settings 表,带默认值与合法性校验。
 
 use crate::error::{AppError, Result};

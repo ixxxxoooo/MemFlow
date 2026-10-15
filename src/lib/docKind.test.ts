@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 import { describe, expect, it } from "vitest";
 import { docExt, editModeOf, renderAsMarkdown } from "./docKind";
 

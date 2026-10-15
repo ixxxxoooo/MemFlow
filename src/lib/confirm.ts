@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 原生确认对话框(WKWebView 中 window.confirm 不可靠,使用 dialog 插件)
 
 import { ask } from "@tauri-apps/plugin-dialog";

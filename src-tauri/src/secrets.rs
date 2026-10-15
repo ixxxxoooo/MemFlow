@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 密钥存取:macOS 使用系统钥匙串,其他平台仅保留在内存中(不落盘)。
 //! API Key 绝不写入 SQLite 的设置 JSON,也不会随备份导出。
 

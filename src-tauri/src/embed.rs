@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 //! 向量化后端的统一入口:按设置在本地 Ollama 与 OpenAI 兼容云端(`/embeddings`)之间切换。
 
 use crate::error::Result;

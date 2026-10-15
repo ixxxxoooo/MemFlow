@@ -2,7 +2,7 @@
 name = "memflow"
 version = "0.1.0"
 description = "MemFlow - 本地 AI 第二大脑"
-authors = ["ygw"]
+authors = ["ixxxxoooo"]
 license = "MIT"
 repository = "https://github.com/ixxxxoooo/MemFlow"
 readme = "../README.md"

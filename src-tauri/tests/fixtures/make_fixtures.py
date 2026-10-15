@@ -1,4 +1,4 @@
-# @author ygw
+# @author ixxxxoooo
 """生成 PDF OCR 测试夹具(依赖 Pillow,macOS 中文字体)。运行: python3 make_fixtures.py"""
 from PIL import Image, ImageDraw, ImageFont
 

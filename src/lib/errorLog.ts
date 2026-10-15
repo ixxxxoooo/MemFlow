@@ -1,4 +1,4 @@
-// @author ygw
+// @author ixxxxoooo
 // 全局前端错误落盘:未捕获异常与未处理的 Promise 拒绝都写入后端日志文件
 
 import { api } from "./api";
