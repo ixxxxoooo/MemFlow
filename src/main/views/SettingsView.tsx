@@ -12,6 +12,7 @@ import type { Settings } from "../../lib/types";
 import { ConnResult, type ConnState } from "../components/ConnResult";
 import { SecretInput } from "../components/SecretInput";
 import { APP_SHORTCUTS } from "../../lib/appShortcuts";
+import { shortcutLabel } from "../../lib/platform";
 import { ProfilesEditor } from "../components/ProfilesEditor";
 import { ModelSourceRows } from "../components/ModelSourceRows";
 import { inputCls, Row } from "../components/SettingsRow";
@@ -298,7 +299,7 @@ export function SettingsView() {
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--fg-faint)]">快捷键</h3>
             <div className="rounded-2xl border border-[var(--line)] px-5">
-              <Row label="唤起闪念胶囊" hint="点击右侧后按下新的组合键(需包含 ⌘ / ⌥ / ⇧ 之一)。">
+              <Row label="唤起闪念胶囊" hint="点击右侧后按下新的组合键(需包含 Ctrl/⌘、Alt/⌥、Shift/⇧ 之一)。">
                 <button
                   className={`btn min-w-[150px] text-[13px] ${recording ? "border-[var(--accent)] text-[var(--accent)]" : "btn-secondary bg-[var(--bg-soft)]"}`}
                   onClick={() => setRecording(true)}
@@ -319,7 +320,7 @@ export function SettingsView() {
                   {APP_SHORTCUTS.map((sc) => (
                     <div key={sc.action} className="flex items-center justify-between gap-6">
                       <span className="text-[var(--fg-dim)]">{sc.label}</span>
-                      <kbd className="rounded border border-[var(--line)] px-1.5 text-[11.5px]">{sc.keys}</kbd>
+                      <kbd className="rounded border border-[var(--line)] px-1.5 text-[11.5px]">{shortcutLabel(sc.key)}</kbd>
                     </div>
                   ))}
                 </div>

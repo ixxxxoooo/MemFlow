@@ -501,21 +501,90 @@ pub fn strip_code_fence(s: &str) -> &str {
     t
 }
 
-/// 在常见安装位置查找 ollama 可执行文件
+/// 在 PATH 与各平台常见安装位置查找 ollama 可执行文件
 ///
 /// 返回: 找到的路径
 pub fn find_ollama_binary() -> Option<std::path::PathBuf> {
-    [
-        "/usr/local/bin/ollama",
-        "/opt/homebrew/bin/ollama",
-        "/Applications/Ollama.app/Contents/Resources/ollama",
-    ]
-    .iter()
-    .map(std::path::PathBuf::from)
-    .find(|p| p.exists())
+    ollama_candidates().into_iter().find(|p| p.is_file())
 }
 
-/// 尝试拉起本机 Ollama(优先打开 App,其次后台执行 `ollama serve`)
+/// 可能的 ollama 可执行文件路径(按优先级)
+fn ollama_candidates() -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let exe = if cfg!(windows) {
+        "ollama.exe"
+    } else {
+        "ollama"
+    };
+    let mut v: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).map(|d| d.join(exe)).collect())
+        .unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        v.extend(
+            [
+                "/usr/local/bin/ollama",
+                "/opt/homebrew/bin/ollama",
+                "/Applications/Ollama.app/Contents/Resources/ollama",
+            ]
+            .map(PathBuf::from),
+        );
+    } else if cfg!(windows) {
+        // 官方安装包默认装到 %LOCALAPPDATA%\Programs\Ollama
+        if let Some(d) = std::env::var_os("LOCALAPPDATA") {
+            v.push(PathBuf::from(d).join("Programs").join("Ollama").join(exe));
+        }
+        if let Some(d) = std::env::var_os("ProgramFiles") {
+            v.push(PathBuf::from(d).join("Ollama").join(exe));
+        }
+    } else {
+        v.extend(
+            [
+                "/usr/local/bin/ollama",
+                "/usr/bin/ollama",
+                "/opt/ollama/bin/ollama",
+            ]
+            .map(PathBuf::from),
+        );
+    }
+    v
+}
+
+/// 尝试用系统方式打开 Ollama 桌面应用(仅 macOS 有 `open -a`)
+async fn open_ollama_app() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        tokio::process::Command::new("open")
+            .args(["-a", "Ollama"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// 后台启动 `ollama serve`(Windows 下不弹出控制台窗口)
+fn spawn_ollama_serve(bin: &std::path::Path) -> std::io::Result<std::process::Child> {
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg("serve")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.spawn()
+}
+
+/// 尝试拉起本机 Ollama(优先打开桌面应用,其次后台执行 `ollama serve`)
 ///
 /// 参数: client 用于轮询探活的客户端
 /// 返回: 在 20 秒内启动成功返回 Ok
@@ -523,22 +592,9 @@ pub async fn try_start_ollama(client: &OllamaClient) -> Result<()> {
     if client.version().await.is_ok() {
         return Ok(());
     }
-    let opened = tokio::process::Command::new("open")
-        .args(["-a", "Ollama"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !opened {
+    if !open_ollama_app().await {
         if let Some(bin) = find_ollama_binary() {
-            std::process::Command::new(bin)
-                .arg("serve")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
+            spawn_ollama_serve(&bin)
                 .map_err(|e| AppError::OllamaUnavailable(format!("无法启动 ollama: {e}")))?;
         } else {
             return Err(AppError::OllamaUnavailable(
@@ -558,6 +614,17 @@ pub async fn try_start_ollama(client: &OllamaClient) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama候选路径包含当前平台的常见位置() {
+        let c = ollama_candidates();
+        assert!(!c.is_empty());
+        if cfg!(windows) {
+            assert!(c.iter().all(|p| p.extension().is_some_and(|e| e == "exe")));
+        } else {
+            assert!(c.iter().any(|p| p.ends_with("ollama")));
+        }
+    }
 
     #[test]
     fn 去除代码围栏() {

@@ -20,14 +20,7 @@
         "height": 800,
         "minWidth": 900,
         "minHeight": 560,
-        "center": true,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 18,
-          "y": 20
-        }
+        "center": true
       },
       {
         "label": "capsule",
@@ -76,10 +69,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg"
-    ],
+    "targets": "all",
     "category": "Productivity",
     "publisher": "ixxxxoooo",
     "copyright": "Copyright © 2026 ixxxxoooo. Released under the MIT License.",
@@ -92,13 +82,22 @@
       "icons/icon.icns",
       "icons/icon.png"
     ],
-    "macOS": {
-      "minimumSystemVersion": "12.0",
-      "signingIdentity": "-",
-      "dmg": {
-        "windowSize": { "width": 640, "height": 400 },
-        "appPosition": { "x": 180, "y": 190 },
-        "applicationFolderPosition": { "x": 460, "y": 190 }
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "utils"
       }
     }
   }

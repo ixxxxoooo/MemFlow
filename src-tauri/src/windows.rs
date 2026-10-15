@@ -176,10 +176,18 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         });
-    if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")) {
-        builder = builder.icon(icon).icon_as_template(true);
-    } else if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
+    // macOS 使用单色模板图标(随深浅色菜单栏自动反色);其它平台托盘背景不可预期,使用彩色应用图标
+    #[cfg(target_os = "macos")]
+    let template = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).ok();
+    #[cfg(not(target_os = "macos"))]
+    let template: Option<tauri::image::Image> = None;
+    match template {
+        Some(icon) => builder = builder.icon(icon).icon_as_template(true),
+        None => {
+            if let Some(icon) = app.default_window_icon() {
+                builder = builder.icon(icon.clone());
+            }
+        }
     }
     builder.build(app)?;
     Ok(())

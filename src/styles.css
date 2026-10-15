@@ -46,7 +46,7 @@
 
 html, body, #root { height: 100%; margin: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei UI", "Noto Sans CJK SC", "Helvetica Neue", system-ui, sans-serif;
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -54,6 +54,9 @@ body {
   overflow: hidden;
 }
 .main-body { background: transparent; }
+/* 只有 macOS 有毛玻璃;Windows / Linux 的主窗口不透明,需要实色背景,胶囊与提示用实色卡片底 */
+html:not([data-platform="macos"]) .main-body { background: var(--bg); }
+html:not([data-platform="macos"]) { --glass: var(--bg-elev); }
 .capsule-body, .toast-body { background: transparent; }
 textarea, input, .selectable, .selectable * { user-select: text; -webkit-user-select: text; }
 /* 注意:这里必须放进 @layer base。

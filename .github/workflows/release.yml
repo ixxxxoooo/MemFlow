@@ -65,11 +65,18 @@ jobs:
             echo
             echo "## 安装"
             echo
-            echo "下载对应芯片的 \`.dmg\`:Apple Silicon 选 \`aarch64\`,Intel 选 \`x64\`。拖入「应用程序」后启动,并确保本机已安装并运行 [Ollama](https://ollama.com)。"
+            echo "| 平台 | 文件 |"
+            echo "| --- | --- |"
+            echo "| macOS · Apple 芯片 (M 系列) | \`MemFlow_*_aarch64.dmg\` |"
+            echo "| macOS · Intel | \`MemFlow_*_x64.dmg\` |"
+            echo "| Windows 10/11 · x64 | \`MemFlow_*_x64-setup.exe\` |"
             echo
-            echo "> 发布包为 ad-hoc 签名,未经 Apple 公证。若首次打开被 Gatekeeper 拦截,请右键 → 打开,或执行 \`xattr -cr /Applications/MemFlow.app\`。"
+            echo "安装后请确保本机已安装并运行 [Ollama](https://ollama.com)(或在设置里改用云端模型,免装 Ollama)。"
             echo
-            echo "校验:\`shasum -a 256 -c SHA256SUMS.txt\`"
+            echo "> macOS 发布包为 ad-hoc 签名,未经 Apple 公证。若首次打开被 Gatekeeper 拦截,请右键 → 打开,或执行 \`xattr -cr /Applications/MemFlow.app\`。"
+            echo "> Windows 安装包未做代码签名,SmartScreen 提示「未知发布者」时点「更多信息 → 仍要运行」。"
+            echo
+            echo "校验:\`sha256sum -c SHA256SUMS.txt\`(macOS 用 \`shasum -a 256 -c SHA256SUMS.txt\`)"
             echo
             echo "完整变更见 [CHANGELOG](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)。"
           } >> release-notes.md
@@ -94,20 +101,31 @@ jobs:
           name: release-notes
           path: release-notes.md
 
-  # 2. 分架构构建 .dmg 并上传到草稿 Release
+  # 2. 分平台/架构构建安装包并上传到草稿 Release
   build:
     name: 构建 ${{ matrix.name }}
     needs: prepare
-    runs-on: macos-latest
-    timeout-minutes: 60
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: true
       matrix:
         include:
           - name: macOS (Apple Silicon)
+            os: macos-latest
             target: aarch64-apple-darwin
+            bundles: dmg
+            ext: dmg
           - name: macOS (Intel)
+            os: macos-latest
             target: x86_64-apple-darwin
+            bundles: dmg
+            ext: dmg
+          - name: Windows (x64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            ext: exe
     steps:
       - uses: actions/checkout@v4
 
@@ -135,7 +153,8 @@ jobs:
       # 若要启用 Apple 开发者签名与公证,请在仓库 Secrets 中配置
       # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY /
       # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID,并把它们通过 env 传入下方步骤;
-      # 未配置时使用 tauri.conf.json 中的 ad-hoc 签名("-")。
+      # 未配置时使用 tauri.macos.conf.json 中的 ad-hoc 签名("-")。
+      # Windows 代码签名同理(需要证书),未配置时安装包不签名。
       - name: 构建并上传 (tag)
         if: github.ref_type == 'tag'
         uses: tauri-apps/tauri-action@v0
@@ -144,7 +163,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseDraft: true
-          args: --target ${{ matrix.target }} --bundles dmg
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: 构建 (手动触发,仅产出构建物)
         if: github.ref_type != 'tag'
@@ -152,14 +171,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target ${{ matrix.target }} --bundles dmg
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: 手动触发时上传构建物
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-${{ matrix.target }}
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          name: ${{ matrix.bundles }}-${{ matrix.target }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundles }}/*.${{ matrix.ext }}
           if-no-files-found: error
 
   # 3. 汇总校验和并正式发布
@@ -172,21 +191,23 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: 下载全部 dmg 并校验数量
+      - name: 下载全部安装包并校验
         run: |
           TAG="${GITHUB_REF_NAME}"
           mkdir assets && cd assets
-          gh release download "$TAG" --repo "${{ github.repository }}" --pattern '*.dmg'
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern '*.dmg' --pattern '*.exe'
           ls -lh
-          COUNT="$(find . -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')"
-          [[ "$COUNT" == "2" ]] || { echo "::error::期望 2 个 dmg,实际 $COUNT"; exit 1; }
+          DMG="$(find . -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')"
+          EXE="$(find . -maxdepth 1 -name '*.exe' | wc -l | tr -d ' ')"
+          [[ "$DMG" == "2" ]] || { echo "::error::期望 2 个 dmg,实际 $DMG"; exit 1; }
+          [[ "$EXE" == "1" ]] || { echo "::error::期望 1 个 Windows 安装包 (.exe),实际 $EXE"; exit 1; }
           [[ -n "$(find . -maxdepth 1 -name '*aarch64*.dmg')" ]] || { echo "::error::缺少 aarch64 dmg"; exit 1; }
           [[ -n "$(find . -maxdepth 1 -name '*x64*.dmg')" ]] || { echo "::error::缺少 x64 dmg"; exit 1; }
 
       - name: 生成 SHA256SUMS.txt 并上传
         run: |
           cd assets
-          sha256sum ./*.dmg | sed 's# \./# #' > SHA256SUMS.txt
+          sha256sum ./*.dmg ./*.exe | sed 's# \./# #' > SHA256SUMS.txt
           cat SHA256SUMS.txt
           gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
 

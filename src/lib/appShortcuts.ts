@@ -1,15 +1,15 @@
 // @author ixxxxoooo
-// 应用内快捷键:⌘, 打开设置、⌘N 记一笔、⌘1/2/3 切换视图。全局唤起胶囊的快捷键见设置页。
+// 应用内快捷键:⌘/Ctrl+, 打开设置、+N 记一笔、+1/2/3 切换视图。全局唤起胶囊的快捷键见设置页。
 
 export type ShortcutAction = "settings" | "capture" | "chat" | "timeline" | "docs";
 
 /** 设置页展示用的快捷键清单 */
-export const APP_SHORTCUTS: { keys: string; label: string; action: ShortcutAction }[] = [
-  { keys: "⌘ ,", label: "打开设置", action: "settings" },
-  { keys: "⌘ N", label: "记一笔", action: "capture" },
-  { keys: "⌘ 1", label: "AI 问答", action: "chat" },
-  { keys: "⌘ 2", label: "记忆时间流", action: "timeline" },
-  { keys: "⌘ 3", label: "知识档案库", action: "docs" },
+export const APP_SHORTCUTS: { key: string; label: string; action: ShortcutAction }[] = [
+  { key: ",", label: "打开设置", action: "settings" },
+  { key: "n", label: "记一笔", action: "capture" },
+  { key: "1", label: "AI 问答", action: "chat" },
+  { key: "2", label: "记忆时间流", action: "timeline" },
+  { key: "3", label: "知识档案库", action: "docs" },
 ];
 
 type KeyLike = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented"> & { isComposing?: boolean };

@@ -428,7 +428,21 @@ impl Core {
     ///
     /// 参数: profile 档案标识;key 密钥
     pub fn set_key_for(&self, profile: &str, key: &str) -> Result<()> {
-        secrets::save_api_key(profile, key)?;
+        if let Err(e) = secrets::save_api_key(profile, key) {
+            // 系统凭据存储不可用(如 Linux 没有运行密钥环服务):密钥仍保留在内存里,
+            // 让本次运行可用,同时如实告知用户重启后需要重新输入
+            if !key.trim().is_empty() {
+                self.set_key_memory(profile, key);
+                self.key_presence
+                    .lock()
+                    .unwrap()
+                    .insert(profile.to_string(), true);
+                return Err(AppError::Other(format!(
+                    "{e}。密钥仅在本次运行期间有效,重启后需要重新输入"
+                )));
+            }
+            return Err(e);
+        }
         self.key_errors.lock().unwrap().remove(profile);
         self.set_key_memory(profile, key);
         self.key_presence

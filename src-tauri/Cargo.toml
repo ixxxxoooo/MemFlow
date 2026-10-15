@@ -21,7 +21,6 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon", "protocol
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
-window-vibrancy = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process"] }
@@ -54,9 +53,15 @@ default = ["rerank"]
 # 本地重排序;关闭后检索只做 RRF 融合
 rerank = ["dep:fastembed"]
 
-# API Key 存系统钥匙串(仅 macOS)
+# API Key 存系统凭据存储:macOS 钥匙串 / Windows 凭据管理器 / Linux Secret Service
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["apple-native"] }
+# 毛玻璃仅 macOS 使用
+window-vibrancy = "0.6"
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3"

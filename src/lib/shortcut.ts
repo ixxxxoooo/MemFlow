@@ -1,6 +1,8 @@
 // @author ixxxxoooo
 // 把键盘事件转成 Tauri 全局快捷键字符串(如 CommandOrControl+Shift+K)
 
+import { platform, type Platform } from "./platform";
+
 /** 返回快捷键字符串;只按了修饰键或没有修饰键时返回 null */
 export function eventToAccelerator(e: KeyboardEvent): string | null {
   const mods: string[] = [];
@@ -18,8 +20,16 @@ export function eventToAccelerator(e: KeyboardEvent): string | null {
   return [...mods, key].join("+");
 }
 
-/** 友好展示:CommandOrControl → ⌘ 等 */
-export function prettyAccelerator(s: string): string {
+/**
+ * 友好展示全局快捷键
+ *
+ * 参数: s 快捷键字符串(如 CommandOrControl+Shift+K);p 平台
+ * 返回: macOS 用 ⌘ ⌥ ⇧ 符号;其它平台显示为 Ctrl+Alt+Shift
+ */
+export function prettyAccelerator(s: string, p: Platform = platform): string {
+  if (p !== "macos") {
+    return s.replace(/CommandOrControl|Command|Cmd|Control/g, "Ctrl").replace(/Option/g, "Alt");
+  }
   return s
     .replace(/CommandOrControl|Command|Cmd/g, "⌘")
     .replace(/Control|Ctrl/g, "⌃")

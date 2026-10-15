@@ -13,13 +13,23 @@ const KEEP_DAYS: usize = 7;
 static GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// 日志目录:macOS 为 `~/Library/Logs/MemFlow`,其它平台为 `~/.memflow/logs`
+/// 日志目录:macOS 为 `~/Library/Logs/MemFlow`,Windows 为 `%LOCALAPPDATA%\\MemFlow\\logs`,
+/// 其它平台为 `~/.memflow/logs`
 pub fn default_log_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    let home = crate::model_fetch::home_dir();
+    let home = if home.as_os_str().is_empty() {
+        std::env::temp_dir()
+    } else {
+        home
+    };
     if cfg!(target_os = "macos") {
         home.join("Library").join("Logs").join("MemFlow")
+    } else if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or(home)
+            .join("MemFlow")
+            .join("logs")
     } else {
         home.join(".memflow").join("logs")
     }

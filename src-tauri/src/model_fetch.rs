@@ -146,8 +146,15 @@ pub fn default_models_root() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".ollama").join("models")
+    home_dir().join(".ollama").join("models")
+}
+
+/// 用户主目录:Unix 用 HOME,Windows 用 USERPROFILE
+pub fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// 计算文件 sha256(阻塞,需在 spawn_blocking 中调用)

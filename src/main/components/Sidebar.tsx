@@ -2,6 +2,7 @@
 // 左栏:导航 + Ollama 状态呼吸灯 + 后台队列状态
 
 import { needsOllama } from "../../lib/modelSource";
+import { isMac, shortcutLabel } from "../../lib/platform";
 import { effectiveRef, useChat } from "../../lib/chatStore";
 import { useApp, type View } from "../../lib/store";
 import { ChatIcon, LibraryIcon, PlusIcon, SettingsIcon, SparkleIcon, TimelineIcon } from "./icons";
@@ -51,7 +52,8 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-[212px] shrink-0 flex-col" style={{ background: "var(--sidebar-tint)" }}>
-      <div data-tauri-drag-region className="h-[52px] shrink-0" />
+      {/* macOS 为红绿灯留白;其它平台使用原生标题栏,只留一点间距 */}
+      <div data-tauri-drag-region className={`${isMac ? "h-[52px]" : "h-3"} shrink-0`} />
       <div className="flex items-center gap-2 px-5 pb-3" data-tauri-drag-region>
         <SparkleIcon size={16} className="text-[var(--accent)]" />
         <span className="text-[15px] font-semibold tracking-tight">MemFlow</span>
@@ -59,12 +61,12 @@ export function Sidebar() {
       <div className="px-2.5 pb-2.5">
         <button
           data-testid="quick-capture-btn"
-          title="随手记一句话、粘贴截图或添加文件(⌘N)"
+          title={`随手记一句话、粘贴截图或添加文件(${shortcutLabel("n")})`}
           onClick={openCapture}
           className="btn btn-primary w-full justify-center"
         >
           <PlusIcon size={14} />记一笔
-          <kbd className="ml-1 rounded bg-white/20 px-1 text-[10.5px] font-normal">⌘N</kbd>
+          <kbd className="ml-1 rounded bg-white/20 px-1 text-[10.5px] font-normal">{shortcutLabel("n").replace(" ", "")}</kbd>
         </button>
       </div>
       <nav className="flex flex-col gap-0.5 px-2.5">
