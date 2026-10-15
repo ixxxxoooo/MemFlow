@@ -9,6 +9,7 @@ import { findPreset, LLM_PRESETS } from "../../lib/llmPresets";
 import { eventToAccelerator, prettyAccelerator } from "../../lib/shortcut";
 import { useApp } from "../../lib/store";
 import type { Settings } from "../../lib/types";
+import { ConnResult, type ConnState } from "../components/ConnResult";
 import { ProfilesEditor } from "../components/ProfilesEditor";
 import { PullControls } from "../components/PullControls";
 import { RerankControls } from "../components/RerankControls";
@@ -36,6 +37,8 @@ export function SettingsView() {
   // 云端 API Key 输入框内容:只在内存中短暂停留,保存后立即清空
   const [keyInput, setKeyInput] = useState("");
   const [testing, setTesting] = useState(false);
+  // 连接测试结果:成功显示绿色对号;地址/模型/密钥任何一项改动后清除,避免展示过期结论
+  const [conn, setConn] = useState<ConnState | null>(null);
   // 本地重排序模型清单;下载结束(pull 回到 null)后刷新安装状态
   const [rerankModels, setRerankModels] = useState<RerankModel[]>([]);
   const pulling = useApp((s) => s.pull);
@@ -44,7 +47,7 @@ export function SettingsView() {
   useEffect(() => { if (status && !form) setForm(status.settings); }, [status, form]);
   if (!form || !status) return <div className="p-8 text-sm text-[var(--fg-dim)]">加载中…</div>;
 
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setForm({ ...form, [k]: v });
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setConn(null); setForm({ ...form, [k]: v }); };
   const dirty = JSON.stringify(form) !== JSON.stringify(status.settings) || keyInput.trim() !== "";
   const settingsDirty = JSON.stringify(form) !== JSON.stringify(status.settings);
   const cloud = form.llmProvider === "openai_compat";
@@ -82,6 +85,7 @@ export function SettingsView() {
   };
 
   const choosePreset = (id: string) => {
+    setConn(null);
     const p = findPreset(id);
     setForm({
       ...form,
@@ -93,14 +97,31 @@ export function SettingsView() {
 
   const testConn = async () => {
     setTesting(true);
+    setConn(null);
     try {
       const msg = await api.testLlmConnection(form.llmBaseUrl, form.llmModel, keyInput.trim() || null);
+      setConn({ ok: true, msg });
       toast(msg, "ok");
     } catch (e) {
+      setConn({ ok: false, msg: (e as Error).message });
       toast((e as Error).message, "err");
     } finally {
+      void refreshStatus();
       setTesting(false);
     }
+  };
+
+  // 钥匙串读取失败时的原因(默认档案)
+  const keyErr = status.keyErrors?.find((k) => k.profile === "default")?.message ?? null;
+
+  const retryKey = async () => {
+    try {
+      await api.retryKeyAccess();
+      toast("已读取到 API Key", "ok");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+    await refreshStatus();
   };
 
   const clearKey = async () => {
@@ -153,23 +174,27 @@ export function SettingsView() {
                       {LLM_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                     </select>
                   </Row>
-                  <Row label="接口地址" hint="含版本路径,实际请求 {地址}/chat/completions。"><input className={inputCls} value={form.llmBaseUrl} onChange={(e) => setForm({ ...form, llmBaseUrl: e.target.value, llmPreset: "custom" })} placeholder="https://api.deepseek.com" /></Row>
+                  <Row label="接口地址" hint="含版本路径,实际请求 {地址}/chat/completions。"><input className={inputCls} value={form.llmBaseUrl} onChange={(e) => { setConn(null); setForm({ ...form, llmBaseUrl: e.target.value, llmPreset: "custom" }); }} placeholder="https://api.deepseek.com" /></Row>
                   <Row label="模型名" hint="DeepSeek 常用 deepseek-chat(通用)或 deepseek-reasoner(推理,更慢)。"><input className={inputCls} value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} placeholder="deepseek-chat" /></Row>
-                  <Row label="API Key" hint={status.hasApiKey ? "已保存在 macOS 钥匙串,不会写入数据库或备份。填写新值并保存即可替换。" : "保存在 macOS 钥匙串,不会写入数据库或备份。"}>
+                  <Row label="API Key" hint={keyErr ? `已保存,但读取失败:${keyErr}` : status.hasApiKey ? "已保存在 macOS 钥匙串,不会写入数据库或备份。填写新值并保存即可替换。" : "保存在 macOS 钥匙串,不会写入数据库或备份。"}>
                     <div className="flex items-center gap-2">
                       <input
                         type="password"
                         autoComplete="off"
                         className={inputCls}
                         value={keyInput}
-                        onChange={(e) => setKeyInput(e.target.value)}
+                        onChange={(e) => { setConn(null); setKeyInput(e.target.value); }}
                         placeholder={status.hasApiKey ? "●●●●●●●●(已保存)" : "sk-..."}
                       />
+                      {keyErr && <button className="btn btn-secondary btn-sm" onClick={() => void retryKey()}>重新授权</button>}
                       {status.hasApiKey && <button className="btn btn-ghost btn-sm" onClick={() => void clearKey()}>清除</button>}
                     </div>
                   </Row>
                   <Row label="连接测试" hint="使用上面填写的地址、模型与密钥发送一个极小请求(无需先保存)。">
-                    <button className="btn btn-secondary" disabled={testing || !form.llmBaseUrl || !form.llmModel || (!keyInput.trim() && !status.hasApiKey)} onClick={() => void testConn()}>{testing ? "测试中…" : "测试连接"}</button>
+                    <div className="flex items-center gap-3">
+                      <ConnResult state={conn} />
+                      <button className="btn btn-secondary" disabled={testing || !form.llmBaseUrl || !form.llmModel || (!keyInput.trim() && !status.hasApiKey)} onClick={() => void testConn()}>{testing ? "测试中…" : "测试连接"}</button>
+                    </div>
                   </Row>
                   <div className="my-3 rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--fg-dim)]">
                     隐私提示:云端模式下,问题与检索到的资料片段会发送给所选服务商。若资料包含敏感信息,请使用本地 Ollama。

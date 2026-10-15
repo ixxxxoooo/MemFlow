@@ -103,6 +103,8 @@ pub struct OpenAiClient {
     http: reqwest::Client,
     base: String,
     api_key: String,
+    /// 密钥为空时的说明(例如钥匙串读取失败),用于给出比"未配置"更准确的错误
+    missing_key_reason: Option<String>,
 }
 
 impl OpenAiClient {
@@ -119,7 +121,14 @@ impl OpenAiClient {
             http,
             base: b,
             api_key: api_key.trim().to_string(),
+            missing_key_reason: None,
         }
+    }
+
+    /// 记录密钥缺失的原因(如钥匙串授权被拒绝),发送请求时作为错误信息
+    pub fn with_missing_key_reason(mut self, reason: String) -> Self {
+        self.missing_key_reason = Some(reason);
+        self
     }
 
     /// 对话接口完整地址
@@ -155,7 +164,9 @@ impl OpenAiClient {
     async fn send(&self, body: &Value, timeout: Option<Duration>) -> Result<reqwest::Response> {
         if self.api_key.is_empty() {
             return Err(AppError::LlmUnavailable(
-                "尚未配置 API Key,请在设置中填写".into(),
+                self.missing_key_reason
+                    .clone()
+                    .unwrap_or_else(|| "尚未配置 API Key,请在设置中填写".into()),
             ));
         }
         let mut req = self

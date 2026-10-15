@@ -106,6 +106,7 @@ pub fn run() {
             commands::pull_model,
             commands::pull_model_direct,
             commands::set_llm_api_key,
+            commands::retry_key_access,
             commands::test_llm_connection,
             commands::cancel_pull,
             commands::rerank_models,

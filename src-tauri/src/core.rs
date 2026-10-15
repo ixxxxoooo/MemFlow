@@ -155,6 +155,8 @@ pub struct OllamaProbe {
 /// 探测结果缓存时长:状态接口被多处高频调用,5 秒内复用
 const PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 /// 后台观察 Ollama 状态变化的间隔
+/// 钥匙串读取失败后,后台任务的重试冷却(用户主动操作不受限),避免队列反复弹授权窗口
+const KEY_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
 const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// 应用核心
@@ -170,6 +172,8 @@ pub struct Core {
     api_keys: Mutex<HashMap<String, Option<String>>>,
     /// 密钥是否存在的缓存(只查存在性,不读内容,不触发钥匙串授权)
     key_presence: Mutex<HashMap<String, bool>>,
+    /// 最近一次钥匙串读取失败的原因与时间(读取成功后清除);失败不会被当作"未保存"缓存
+    key_errors: Mutex<HashMap<String, (String, std::time::Instant)>>,
     /// Ollama 探测缓存:(地址, 时间, 结果)
     probe_cache: Mutex<Option<(String, std::time::Instant, OllamaProbe)>>,
     /// 查询向量缓存(容量 64)
@@ -219,6 +223,7 @@ impl Core {
             cloud_http: build_cloud_http(),
             api_keys: Mutex::new(HashMap::new()),
             key_presence: Mutex::new(HashMap::new()),
+            key_errors: Mutex::new(HashMap::new()),
             probe_cache: Mutex::new(None),
             query_vecs: Mutex::new(crate::query_cache::QueryCache::new(64)),
             settings: RwLock::new(settings.clone()),
@@ -334,11 +339,65 @@ impl Core {
     /// 某云端档案的 API Key(首次访问时从钥匙串读取并缓存)
     ///
     /// 参数: profile 档案标识,default 为默认云端模型
+    /// 读取失败(如用户拒绝授权)返回 None,但不会缓存失败,下次仍会重试
     pub fn key_for(&self, profile: &str) -> Option<String> {
-        let mut g = self.api_keys.lock().unwrap();
-        g.entry(profile.to_string())
-            .or_insert_with(|| secrets::load_api_key(profile))
-            .clone()
+        self.key_try(profile, false).ok().flatten()
+    }
+
+    /// 读取密钥并区分"没有"与"读取失败"
+    ///
+    /// 参数: profile 档案标识;force 为 true 时忽略失败冷却,立即重试(用户主动操作时使用)
+    /// 返回: Ok(Some) 有密钥;Ok(None) 确实未保存;Err 为读取失败的原因。
+    /// 后台任务读取失败后 30 秒内不会再次触发钥匙串弹窗,避免队列重试时反复打扰用户。
+    pub fn key_try(
+        &self,
+        profile: &str,
+        force: bool,
+    ) -> std::result::Result<Option<String>, String> {
+        if let Some(v) = self.api_keys.lock().unwrap().get(profile) {
+            return Ok(v.clone());
+        }
+        if !force {
+            if let Some((msg, at)) = self.key_errors.lock().unwrap().get(profile) {
+                if at.elapsed() < KEY_RETRY_COOLDOWN {
+                    return Err(msg.clone());
+                }
+            }
+        }
+        match secrets::load_api_key(profile) {
+            secrets::KeyLoad::Found(k) => {
+                self.key_errors.lock().unwrap().remove(profile);
+                self.api_keys
+                    .lock()
+                    .unwrap()
+                    .insert(profile.to_string(), Some(k.clone()));
+                Ok(Some(k))
+            }
+            secrets::KeyLoad::Missing => {
+                self.key_errors.lock().unwrap().remove(profile);
+                self.api_keys
+                    .lock()
+                    .unwrap()
+                    .insert(profile.to_string(), None);
+                Ok(None)
+            }
+            secrets::KeyLoad::Failed(msg) => {
+                self.key_errors.lock().unwrap().insert(
+                    profile.to_string(),
+                    (msg.clone(), std::time::Instant::now()),
+                );
+                Err(msg)
+            }
+        }
+    }
+
+    /// 某档案最近一次钥匙串读取失败的原因(无失败返回 None)
+    pub fn key_error(&self, profile: &str) -> Option<String> {
+        self.key_errors
+            .lock()
+            .unwrap()
+            .get(profile)
+            .map(|(m, _)| m.clone())
     }
 
     /// 某档案是否已保存密钥。只查存在性、不读取内容,因此不会弹出钥匙串授权窗口;
@@ -367,6 +426,7 @@ impl Core {
     /// 参数: profile 档案标识;key 密钥
     pub fn set_key_for(&self, profile: &str, key: &str) -> Result<()> {
         secrets::save_api_key(profile, key)?;
+        self.key_errors.lock().unwrap().remove(profile);
         self.set_key_memory(profile, key);
         self.key_presence
             .lock()
@@ -409,12 +469,15 @@ impl Core {
     pub fn llm(&self) -> LlmClient {
         let s = self.settings();
         if s.uses_cloud_llm() {
-            let key = self.api_key().unwrap_or_default();
-            LlmClient::OpenAi(OpenAiClient::new(
-                self.cloud_http.clone(),
-                &s.llm_base_url,
-                &key,
-            ))
+            let (key, why) = match self.key_try(secrets::DEFAULT_PROFILE, false) {
+                Ok(k) => (k.unwrap_or_default(), None),
+                Err(e) => (String::new(), Some(e)),
+            };
+            let mut c = OpenAiClient::new(self.cloud_http.clone(), &s.llm_base_url, &key);
+            if let Some(w) = why {
+                c = c.with_missing_key_reason(w);
+            }
+            LlmClient::OpenAi(c)
         } else {
             LlmClient::Ollama(self.ollama())
         }

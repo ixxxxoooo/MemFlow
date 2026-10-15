@@ -55,6 +55,16 @@ pub struct AppStatus {
     pub has_api_key: bool,
     /// 已配置密钥的云端档案标识(含 default)
     pub keyed_profiles: Vec<String>,
+    /// 已保存但最近一次读取失败的云端档案及原因(如用户拒绝了钥匙串授权),界面据此提示重新授权
+    pub key_errors: Vec<KeyErrorView>,
+}
+
+/// 钥匙串读取失败信息
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyErrorView {
+    pub profile: String,
+    pub message: String,
 }
 
 /// 记录详情
@@ -130,6 +140,15 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
         keyed_profiles: std::iter::once(crate::secrets::DEFAULT_PROFILE.to_string())
             .chain(settings.llm_profiles.iter().map(|p| p.id.clone()))
             .filter(|id| core.key_present(id))
+            .collect(),
+        key_errors: std::iter::once(crate::secrets::DEFAULT_PROFILE.to_string())
+            .chain(settings.llm_profiles.iter().map(|p| p.id.clone()))
+            .filter_map(|id| {
+                core.key_error(&id).map(|message| KeyErrorView {
+                    profile: id,
+                    message,
+                })
+            })
             .collect(),
         settings,
     })
@@ -285,6 +304,27 @@ pub fn set_llm_api_key(core: S<'_>, key: String, profile_id: Option<String>) -> 
     Ok(())
 }
 
+/// 重新读取钥匙串中的密钥(用户在授权弹窗点过「拒绝」后,用它重新触发授权)
+///
+/// 参数: profile_id 档案标识,为空表示默认云端模型
+/// 返回: 读取成功 Ok;失败返回原因(如授权被拒绝)
+#[tauri::command]
+pub fn retry_key_access(core: S<'_>, profile_id: Option<String>) -> Result<()> {
+    let pid = profile_id.unwrap_or_else(|| crate::secrets::DEFAULT_PROFILE.to_string());
+    let r = core.key_try(&pid, true);
+    queue::emit_status(&core);
+    match r {
+        Ok(Some(_)) => {
+            core.wake.notify_one();
+            Ok(())
+        }
+        Ok(None) => Err(AppError::Invalid(
+            "钥匙串中没有找到已保存的 API Key,请重新输入并保存".into(),
+        )),
+        Err(e) => Err(AppError::Invalid(e)),
+    }
+}
+
 /// 测试云端模型连接(使用界面上尚未保存的地址与模型;key 为空则用已保存的密钥)
 #[tauri::command]
 pub async fn test_llm_connection(
@@ -303,16 +343,19 @@ pub async fn test_llm_connection(
     if model.trim().is_empty() {
         return Err(AppError::Invalid("云端模型名不能为空".into()));
     }
-    let key = key
-        .filter(|k| !k.trim().is_empty())
-        .or_else(|| {
-            core.key_for(
-                profile_id
-                    .as_deref()
-                    .unwrap_or(crate::secrets::DEFAULT_PROFILE),
-            )
-        })
-        .unwrap_or_default();
+    // 用户主动测试时强制重试钥匙串(忽略后台冷却),读取失败要如实告知原因而不是说"未配置"
+    let pid = profile_id
+        .as_deref()
+        .unwrap_or(crate::secrets::DEFAULT_PROFILE);
+    let key = match key.filter(|k| !k.trim().is_empty()) {
+        Some(k) => k,
+        None => {
+            let r = core.key_try(pid, true);
+            // 无论成败都刷新状态,让界面同步"授权失败"提示
+            queue::emit_status(&core);
+            r.map_err(AppError::Invalid)?.unwrap_or_default()
+        }
+    };
     core.cloud_client(base, &key).ping(model.trim()).await
 }
 

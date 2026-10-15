@@ -8,6 +8,7 @@ import { findPreset, LLM_PRESETS } from "../../lib/llmPresets";
 import { useApp } from "../../lib/store";
 import type { LlmProfile } from "../../lib/types";
 import { BrandIcon } from "./BrandIcon";
+import { ConnResult, type ConnState } from "./ConnResult";
 import { PlusIcon, TrashIcon } from "./icons";
 
 const inputCls = "w-full rounded-lg border border-[var(--line)] bg-[var(--bg-soft)] px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--accent)]";
@@ -27,10 +28,16 @@ export function ProfilesEditor({ profiles, onChange }: Props) {
   // 每个档案的密钥输入框:只在内存中短暂停留
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 各档案的连接测试结果;该档案的地址/模型/密钥变化后清除
+  const [conns, setConns] = useState<Record<string, ConnState | null>>({});
+  const clearConn = (id: string) => setConns((m) => (m[id] ? { ...m, [id]: null } : m));
   const keyed = new Set(status?.keyedProfiles ?? []);
+  const keyErrs = new Map((status?.keyErrors ?? []).map((k) => [k.profile, k.message]));
 
-  const patch = (id: string, p: Partial<LlmProfile>) =>
+  const patch = (id: string, p: Partial<LlmProfile>) => {
+    if ("baseUrl" in p || "model" in p || "preset" in p) clearConn(id);
     onChange(profiles.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  };
 
   const add = () => {
     const preset = findPreset("deepseek")!;
@@ -75,12 +82,16 @@ export function ProfilesEditor({ profiles, onChange }: Props) {
 
   const test = async (p: LlmProfile) => {
     setBusyId(p.id);
+    setConns((m) => ({ ...m, [p.id]: null }));
     try {
       const msg = await api.testLlmConnection(p.baseUrl, p.model, (keys[p.id] ?? "").trim() || null, p.id);
+      setConns((m) => ({ ...m, [p.id]: { ok: true, msg } }));
       toast(msg, "ok");
     } catch (e) {
+      setConns((m) => ({ ...m, [p.id]: { ok: false, msg: (e as Error).message } }));
       toast((e as Error).message, "err");
     } finally {
+      void refreshStatus();
       setBusyId(null);
     }
   };
@@ -126,15 +137,18 @@ export function ProfilesEditor({ profiles, onChange }: Props) {
                 autoComplete="off"
                 className={inputCls}
                 value={keys[p.id] ?? ""}
-                onChange={(e) => setKeys((m) => ({ ...m, [p.id]: e.target.value }))}
+                onChange={(e) => { clearConn(p.id); setKeys((m) => ({ ...m, [p.id]: e.target.value })); }}
                 placeholder={has ? "●●●●●●●●(已保存,填写新值可替换)" : "API Key,sk-..."}
               />
               <button className="btn btn-secondary btn-sm shrink-0" disabled={busy || !(keys[p.id] ?? "").trim()} onClick={() => void saveKey(p)}>保存密钥</button>
               {has && <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void clearKey(p)}>清除</button>}
+              <ConnResult state={conns[p.id] ?? null} />
               <button className="btn btn-secondary btn-sm shrink-0" disabled={busy || !p.baseUrl || !p.model || (!has && !(keys[p.id] ?? "").trim())} onClick={() => void test(p)}>{busy ? "…" : "测试"}</button>
             </div>
             <div className="mt-1.5 text-[11px] text-[var(--fg-faint)]">
-              {has ? "密钥已就绪,对话里可选用此模型。" : "保存密钥后,对话里才可选用此模型。"}修改地址/模型后需点右上角「保存设置」。
+              {keyErrs.has(p.id)
+                ? `密钥已保存,但读取失败:${keyErrs.get(p.id)}。`
+                : has ? "密钥已就绪,对话里可选用此模型。" : "保存密钥后,对话里才可选用此模型。"}修改地址/模型后需点右上角「保存设置」。
             </div>
           </div>
         );

@@ -194,9 +194,15 @@ pub fn resolve(core: &Core, model_ref: Option<&str>) -> Result<ResolvedModel> {
                 .ok_or_else(|| AppError::Invalid("所选云端模型已被删除".into()))?;
             (p.base_url.clone(), p.model.clone(), p.preset.clone())
         };
-        let key = core
-            .key_for(pid)
-            .ok_or_else(|| AppError::Llm("所选云端模型尚未配置 API Key,请到设置里填写".into()))?;
+        let key = match core.key_try(pid, false) {
+            Ok(Some(k)) => k,
+            Ok(None) => {
+                return Err(AppError::Llm(
+                    "所选云端模型尚未配置 API Key,请到设置里填写".into(),
+                ))
+            }
+            Err(why) => return Err(AppError::Llm(why)),
+        };
         return Ok(ResolvedModel {
             client: LlmClient::OpenAi(OpenAiClient::new(core.cloud_http(), &base, &key)),
             model,

@@ -468,3 +468,19 @@ async fn 直连下载_可取消() {
     .unwrap_err();
     assert!(matches!(err, AppError::Cancelled));
 }
+
+/// 内存里已有密钥时,读取不会再碰钥匙串;清空后"确实没有"与"读取失败"是两回事
+#[tokio::test]
+async fn 密钥读取区分缺失与失败且不记录失败() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = test_core(dir.path(), "http://127.0.0.1:9");
+    core.set_key_memory("p1", "sk-test");
+    assert_eq!(core.key_try("p1", false), Ok(Some("sk-test".to_string())));
+    assert!(core.key_present("p1"));
+    assert!(core.key_error("p1").is_none());
+    // 清空后:缓存为"确实没有",不是读取失败
+    core.set_key_memory("p1", "");
+    assert_eq!(core.key_try("p1", false), Ok(None));
+    assert!(!core.key_present("p1"));
+    assert!(core.key_error("p1").is_none());
+}

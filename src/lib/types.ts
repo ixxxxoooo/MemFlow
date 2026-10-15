@@ -280,6 +280,8 @@ export interface AppStatus {
   hasApiKey: boolean;
   /** 已保存密钥的额外档案 id */
   keyedProfiles: string[];
+  /** 已保存但钥匙串读取失败的档案(如授权被拒绝),界面据此提示重新授权 */
+  keyErrors: { profile: string; message: string }[];
 }
 
 export interface TagCount {
