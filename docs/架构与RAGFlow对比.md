@@ -11,7 +11,7 @@
 | 临时文件、数据库备份 | `.../MemFlow/tmp/`、`.../MemFlow/backups/` |
 | 重排序模型 | `.../MemFlow/models/rerank/<模型名>/` |
 | 运行日志(按天滚动,保留 7 天) | `~/Library/Logs/MemFlow/memflow.log.*` |
-| 云端 API Key | macOS 钥匙串,服务名 `com.ixxxxoooo.memflow`(与 bundle 标识一致,旧版本的条目首次使用时自动迁移)(不入库、不进备份) |
+| 云端 API Key | macOS 钥匙串,服务名 `com.ixxxxoooo.memflow`(与 bundle 标识一致,旧版本 `com.memflow.app` 的条目首次使用时自动迁移);不入库、不进备份 |
 | Ollama 模型 | `~/.ollama/models`(由 Ollama 管理) |
 
 向量以 BLOB 存在 `chunks.embedding`,启动时按嵌入模型加载进内存做余弦检索;重建索引不需要重新向量化。
@@ -55,7 +55,10 @@ MemFlow 的对应关系:BM25 → SQLite FTS5;kNN → 内存暴力余弦(个人�
 - 入库多 worker 并发,按阶段限流:提取/OCR 受 CPU 数限制,向量化并发 2,云端元数据并发 4、本地 1。
 - 向量检索:入库时归一化,余弦退化为点积,`BinaryHeap` 取 top-k,切片较多时并行扫描。
 - 对话:查询改写仅在需要时执行并与原问题检索并行(1.2 秒超时);模型预热与 `keep_alive`;查询向量 LRU 缓存。
-- 界面:列表游标分页 + 虚拟滚动,状态轮询改事件推送。
+- 界面:时间流游标分页并在滚动到底部时自动加载;卡片 `memo` + `content-visibility: auto`,屏幕外内容跳过布局与绘制;Ollama 状态由后端观察并在变化时推送事件(前端 30 秒轮询仅兜底),探测结果缓存 5 秒。
+- 上下文:检索结果先做重复/近似重复(字符二元组 Jaccard ≥ 0.85)过滤,再按字符预算截取,把预算留给不同的资料。
+- 钥匙串:界面状态与模型列表只检查密钥是否存在(`security` 命令,不弹窗);只有真正调用云端模型时才读取密钥内容,一次读取后缓存在内存。
+- 扫描 PDF OCR 放在常驻子进程里执行:macOS 首次使用某个可执行文件做 Vision 识别时需要编译神经引擎模型,之后同一进程内的识别会一直失败,换新进程才恢复;子进程识别失败会自动重启重试,空闲 90 秒自动退出。开发时每次重新编译后的第一份扫描件会慢约 20 秒。
 
 建议的 Ollama 环境变量(终端 `launchctl setenv` 或 Ollama 菜单中配置后重启 Ollama):
 
