@@ -20,6 +20,7 @@ mod ffi {
         pub fn mf_pdf_close(h: *mut c_void);
         pub fn mf_pdf_page_text(h: *mut c_void, idx: c_long) -> *mut c_char;
         pub fn mf_pdf_page_ocr_json(h: *mut c_void, idx: c_long) -> *mut c_char;
+        pub fn mf_image_ocr_json(path: *const c_char) -> *mut c_char;
         pub fn mf_pdf_page_png(
             h: *mut c_void,
             idx: c_long,
@@ -145,6 +146,69 @@ impl PdfDoc {
     }
 }
 
+/// 在当前进程内直接识别图片文件,返回 JSON 文本(进程内同一时刻只允许一个识别)
+#[cfg(target_os = "macos")]
+pub fn image_ocr_json_direct(path: &Path) -> Option<String> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let c = std::ffi::CString::new(path.to_str()?).ok()?;
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: c 在调用期间有效;返回的缓冲由 take_string 读取后释放
+    let p = unsafe { ffi::mf_image_ocr_json(c.as_ptr()) };
+    if p.is_null() {
+        return None;
+    }
+    let s = unsafe { std::ffi::CStr::from_ptr(p) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { ffi::mf_free(p.cast()) };
+    Some(s)
+}
+
+/// 识别图片文件里的文字(本机 Vision,不依赖任何模型)
+///
+/// 优先走常驻 OCR 子进程(首次编译神经引擎模型时同进程会持续失败,需换进程重试),
+/// 子进程不可用时退回当前进程。
+/// 返回: 按阅读顺序拼接的文字;图片无文字或无法解码时返回空串;识别引擎失败返回 Err
+#[cfg(target_os = "macos")]
+pub fn image_ocr_text(path: &Path) -> Result<String> {
+    let json = match crate::ocr_worker::ocr_image_via_worker(path) {
+        crate::ocr_worker::WorkerResult::Json(j) => j,
+        crate::ocr_worker::WorkerResult::Failed => {
+            return Err(AppError::Parse("图片 OCR 失败".into()))
+        }
+        crate::ocr_worker::WorkerResult::Unavailable => {
+            image_ocr_json_direct(path).ok_or_else(|| AppError::Parse("图片 OCR 失败".into()))?
+        }
+    };
+    let lines = parse_ocr_json(&json)?;
+    Ok(lines_to_plain(&lines))
+}
+
+/// 非 macOS 平台没有本机 OCR
+#[cfg(not(target_os = "macos"))]
+pub fn image_ocr_text(_path: &Path) -> Result<String> {
+    Err(AppError::Parse("当前平台不支持 OCR".into()))
+}
+
+/// OCR 行按阅读顺序拼成纯文本(一行一句,总长度限制 20000 字符)
+pub fn lines_to_plain(lines: &[OcrLine]) -> String {
+    let mut out = String::new();
+    for l in lines {
+        let t = l.text.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(t);
+        if out.chars().count() > 20_000 {
+            return out.chars().take(20_000).collect();
+        }
+    }
+    out
+}
+
 /// 解析 ObjC 侧返回的 OCR JSON
 pub fn parse_ocr_json(json: &str) -> Result<Vec<OcrLine>> {
     #[derive(serde::Deserialize)]
@@ -186,5 +250,25 @@ mod tests {
         assert_eq!(lines[0].text, "你好");
         assert!((lines[0].w - 0.3).abs() < 1e-6);
         assert!(parse_ocr_json("不是json").is_err());
+        // 无法解码的图片带 error 字段,按"没有文字"处理
+        assert!(parse_ocr_json(r#"{"lines":[],"error":"decode"}"#)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn 行转纯文本() {
+        let l = |t: &str| OcrLine {
+            text: t.into(),
+            x: 0.0,
+            y: 0.0,
+            w: 0.1,
+            h: 0.1,
+        };
+        assert_eq!(
+            lines_to_plain(&[l("第一行"), l("  "), l("第二行")]),
+            "第一行\n第二行"
+        );
+        assert_eq!(lines_to_plain(&[]), "");
     }
 }

@@ -12,6 +12,7 @@ import type { ItemDetail } from "../../lib/types";
 import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
 import { useKb } from "../../lib/kbStore";
 import { CloseIcon, EditIcon, MoveIcon, RefreshIcon, TrashIcon } from "./icons";
+import { ImageThumbs } from "./ImageThumbs";
 import { MoveToMenu } from "./MoveToMenu";
 
 /** 根据附件相对路径生成可显示的 URL */
@@ -30,7 +31,7 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 export function ItemDrawer() {
-  const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus } = useApp();
+  const { drawer, closeDrawer, itemsDeleted, toast, dataVersion, bumpData, refreshStatus, openDocModal } = useApp();
   const { kbs, move } = useKb();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -160,6 +161,26 @@ export function ItemDrawer() {
               </section>
             )}
 
+            {it.kind === "image" && detail && detail.parents.length > 0 && (
+              <section>
+                <div className="mb-1 text-[11px] font-medium text-[var(--fg-dim)]">被以下文档引用</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.parents.map((p) => (
+                    <button key={p.id} className="max-w-full truncate rounded-full border border-[var(--line)] px-2.5 py-0.5 text-xs hover:border-[var(--accent)] hover:text-[var(--accent)]" onClick={() => (p.kind === "document" ? openDocModal(p.id) : undefined)}>
+                      《{p.title ?? p.originalName ?? "文档"}》
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {it.kind === "image" && it.ocrText && (
+              <section>
+                <div className="mb-1 text-[11px] font-medium text-[var(--fg-dim)]" title="由本机系统识别,不调用任何模型;可被文字搜索命中">图中文字(本机识别)</div>
+                <p className="whitespace-pre-wrap leading-relaxed">{it.ocrText}</p>
+              </section>
+            )}
+
             {it.visionText && (
               <section>
                 <div className="mb-1 text-[11px] font-medium text-[var(--fg-dim)]">视觉解析</div>
@@ -177,6 +198,7 @@ export function ItemDrawer() {
                       <div key={c.id} ref={hl ? hlRef : undefined} className={`rounded-lg border p-2.5 ${hl ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}>
                         <div className="mb-1 text-[10px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}{pageLabel(c.page)}</div>
                         <p className="whitespace-pre-wrap leading-relaxed">{c.text}</p>
+                        <ImageThumbs images={c.images} size={52} />
                       </div>
                     );
                   })}

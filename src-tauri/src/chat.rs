@@ -88,6 +88,10 @@ pub struct SourceView {
     pub created_at: i64,
     pub attachment_path: Option<String>,
     pub score: f32,
+    /// 该切片里出现的图片(文档里的插图),用于展示缩略图
+    pub images: Vec<repo::ImageRef>,
+    /// 图片命中时,它来自哪些文档(如「来自《A》」)
+    pub via: Option<String>,
 }
 
 /// 把检索命中转换为带编号的资料视图
@@ -111,6 +115,8 @@ pub fn to_sources(hits: &[Hit]) -> Vec<SourceView> {
             created_at: h.created_at,
             attachment_path: h.attachment_path.clone(),
             score: h.score,
+            images: vec![],
+            via: None,
         })
         .collect()
 }
@@ -522,6 +528,25 @@ pub async fn ask_in(
             s.kb_name = kbs.iter().find(|k| k.id == s.kb_id).map(|k| k.name.clone());
         }
     }
+    // 补全图文关联:切片里的插图;图片命中时标注它来自哪些文档
+    let _ = core.db.with_read(|c| {
+        let ids: Vec<i64> = sources.iter().map(|s| s.chunk_id).collect();
+        let mut imgs = repo::chunk_image_refs(c, &ids)?;
+        for s in &mut sources {
+            s.images = imgs.remove(&s.chunk_id).unwrap_or_default();
+            if s.kind == "image" {
+                let names: Vec<String> = repo::parents_of(c, s.item_id)?
+                    .into_iter()
+                    .take(2)
+                    .map(|p| format!("《{}》", p.title.or(p.original_name).unwrap_or_default()))
+                    .collect();
+                if !names.is_empty() {
+                    s.via = Some(format!("来自{}", names.join("、")));
+                }
+            }
+        }
+        Ok(())
+    });
     emit(ChatEvent::Sources {
         sources: sources.clone(),
     });

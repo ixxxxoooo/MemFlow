@@ -172,7 +172,15 @@ fn extract_docx(path: &Path) -> Result<String> {
             .read_to_string(&mut xml)
             .map_err(|e| AppError::Parse(format!("DOCX 正文读取失败: {e}")))?;
     }
-    Ok(docx_xml_to_text(&xml))
+    // 图片关系表:正文里的内嵌图片以 `![](media/xxx.png)` 占位,导入时已作为图片记录关联
+    let mut rels_xml = String::new();
+    if let Ok(entry) = zip.by_name("word/_rels/document.xml.rels") {
+        let _ = entry.take(8 * 1024 * 1024).read_to_string(&mut rels_xml);
+    }
+    Ok(docx_xml_to_text_with(
+        &xml,
+        &crate::images::docx_rels(&rels_xml),
+    ))
 }
 
 /// 把 document.xml 转为文本(可单独测试)
@@ -180,8 +188,18 @@ fn extract_docx(path: &Path) -> Result<String> {
 /// 参数: xml 正文 XML
 /// 返回: 纯文本,标题段落以 Markdown # 前缀表示
 pub fn docx_xml_to_text(xml: &str) -> String {
+    docx_xml_to_text_with(xml, &std::collections::HashMap::new())
+}
+
+/// 把 document.xml 转为文本,并把内嵌图片还原为 `![](Target)` 占位
+///
+/// 参数: xml 正文 XML;rels 图片关系表(rId → Target)
+pub fn docx_xml_to_text_with(
+    xml: &str,
+    rels: &std::collections::HashMap<String, String>,
+) -> String {
     let re = Regex::new(
-        r#"<w:pStyle w:val="(?:Heading|heading|标题)\s*(\d)"\s*/>|<w:t(?:\s[^>]*)?>([^<]*)</w:t>|</w:p>|<w:br\s*/>|<w:tab\s*/>"#,
+        r#"<w:pStyle w:val="(?:Heading|heading|标题)\s*(\d)"\s*/>|<w:t(?:\s[^>]*)?>([^<]*)</w:t>|</w:p>|<w:br\s*/>|<w:tab\s*/>|<a:blip\b[^>]*?\br:embed="([^"]+)"|<v:imagedata\b[^>]*?\br:id="([^"]+)""#,
     )
     .expect("正则非法");
     let mut out = String::new();
@@ -193,6 +211,10 @@ pub fn docx_xml_to_text(xml: &str) -> String {
             heading = level.as_str().parse::<usize>().ok().map(|l| l.clamp(1, 6));
         } else if let Some(t) = cap.get(2) {
             para.push_str(&decode_xml(t.as_str()));
+        } else if let Some(rid) = cap.get(3).or_else(|| cap.get(4)) {
+            if let Some(target) = rels.get(rid.as_str()) {
+                para.push_str(&format!("\n![]({target})\n"));
+            }
         } else if whole == "</w:p>" {
             let text = para.trim();
             if !text.is_empty() {

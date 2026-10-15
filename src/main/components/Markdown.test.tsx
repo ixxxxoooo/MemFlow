@@ -76,3 +76,39 @@ describe("Markdown 流程图节点稳定性", () => {
     expect(flow?.live).toBe(false);
   });
 });
+
+describe("Markdown 图片渲染", () => {
+  let el: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    el = document.createElement("div");
+    document.body.appendChild(el);
+    root = createRoot(el);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    el.remove();
+  });
+
+  it("关联到的图片内联显示,点击回调图片 id;未关联与远程图只显示替代文字且不发请求", () => {
+    const images = new Map([["../img/预算.png", { url: "asset://x/a.png", id: 7, name: "a.png" }]]);
+    const clicked: number[] = [];
+    act(() =>
+      root.render(
+        <Markdown
+          text={"![预算](../img/%E9%A2%84%E7%AE%97.png)\n\n![缺失](none.png)\n\n![远程](https://e.com/x.png)"}
+          images={images}
+          onImageClick={(id) => clicked.push(id)}
+        />,
+      ),
+    );
+    const imgs = el.querySelectorAll("img");
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0].getAttribute("src")).toBe("asset://x/a.png");
+    act(() => imgs[0].click());
+    expect(clicked).toEqual([7]);
+    expect(el.textContent).toContain("[图片:缺失]");
+    expect(el.textContent).toContain("[图片:远程]");
+  });
+});
+

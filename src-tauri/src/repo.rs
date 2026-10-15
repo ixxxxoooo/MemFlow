@@ -33,6 +33,10 @@ pub struct ItemView {
     pub tags: Vec<String>,
     pub entities: Vec<String>,
     pub vision_text: Option<String>,
+    /// 本机 OCR 识别出的图中文字(图片记录)
+    pub ocr_text: Option<String>,
+    /// 是否由文档内嵌/引用自动导入的图片
+    pub embedded: bool,
     pub meta_model: Option<String>,
     pub prompt_version: Option<i64>,
     pub chunk_count: i64,
@@ -50,6 +54,17 @@ pub struct ChunkView {
     pub embed_model: Option<String>,
     /// 所在页码(PDF 文档)
     pub page: Option<i64>,
+    /// 该切片里出现的图片
+    pub images: Vec<ImageRef>,
+}
+
+/// 切片关联的图片(用于展示缩略图)
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageRef {
+    pub id: i64,
+    pub attachment_path: Option<String>,
+    pub name: Option<String>,
 }
 
 /// 记录列表过滤条件
@@ -80,6 +95,8 @@ pub struct NewItem {
     pub kb_id: Option<i64>,
     /// 来源路径(文件夹导入)
     pub source_path: Option<String>,
+    /// 是否由文档内嵌/引用自动导入的图片
+    pub embedded: bool,
 }
 
 /// 新建切片参数
@@ -105,6 +122,10 @@ pub struct NewMeta {
     pub tags: Vec<String>,
     pub entities: Vec<String>,
     pub vision_text: Option<String>,
+    /// 本机 OCR 文字;None 表示不改动已有值
+    pub ocr_text: Option<String>,
+    /// 视觉模型描述;None 表示不改动已有值
+    pub vision_desc: Option<String>,
     pub model: Option<String>,
     pub prompt_version: i64,
 }
@@ -202,7 +223,7 @@ fn item_select(full_content: bool) -> String {
     format!(
         "SELECT i.id, i.kind, i.title, {content_expr}, length(i.content), i.attachment_path, i.original_name, i.mime, \
          i.status, i.error, i.created_at, i.updated_at, m.summary, m.category, m.tags, m.entities, m.vision_text, \
-         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id), i.kb_id, i.source_path \
+         m.model, m.prompt_version, (SELECT count(*) FROM chunks c WHERE c.item_id = i.id), i.kb_id, i.source_path, m.ocr_text, i.embedded \
          FROM items i LEFT JOIN item_meta m ON m.item_id = i.id"
     )
 }
@@ -236,6 +257,8 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
         chunk_count: r.get(19)?,
         kb_id: r.get(20)?,
         source_path: r.get(21)?,
+        ocr_text: r.get(22)?,
+        embedded: r.get::<_, i64>(23)? != 0,
     })
 }
 
@@ -246,8 +269,8 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemView> {
 pub fn insert_item(c: &Connection, it: &NewItem) -> Result<i64> {
     let now = now_ms();
     c.execute(
-        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at,kb_id,source_path) \
-         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8,?9,?10)",
+        "INSERT INTO items(kind,title,content,attachment_path,original_name,mime,content_hash,status,created_at,updated_at,kb_id,source_path,embedded) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?8,?9,?10,?11)",
         params![
             it.kind,
             it.title,
@@ -258,7 +281,8 @@ pub fn insert_item(c: &Connection, it: &NewItem) -> Result<i64> {
             it.content_hash,
             now,
             it.kb_id.unwrap_or(DEFAULT_KB_ID),
-            it.source_path
+            it.source_path,
+            it.embedded as i64
         ],
     )?;
     Ok(c.last_insert_rowid())
@@ -396,11 +420,13 @@ pub fn delete_item(c: &Connection, id: i64) -> Result<()> {
 /// 写入/覆盖派生元数据
 pub fn upsert_meta(c: &Connection, item_id: i64, m: &NewMeta) -> Result<()> {
     c.execute(
-        "INSERT INTO item_meta(item_id,summary,category,tags,entities,vision_text,model,prompt_version,updated_at) \
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) \
+        "INSERT INTO item_meta(item_id,summary,category,tags,entities,vision_text,model,prompt_version,updated_at,ocr_text,vision_desc) \
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) \
          ON CONFLICT(item_id) DO UPDATE SET summary=excluded.summary, category=excluded.category, tags=excluded.tags, \
          entities=excluded.entities, vision_text=excluded.vision_text, model=excluded.model, \
-         prompt_version=excluded.prompt_version, updated_at=excluded.updated_at",
+         prompt_version=excluded.prompt_version, updated_at=excluded.updated_at, \
+         ocr_text=COALESCE(excluded.ocr_text, item_meta.ocr_text), \
+         vision_desc=COALESCE(excluded.vision_desc, item_meta.vision_desc)",
         params![
             item_id,
             m.summary,
@@ -410,7 +436,9 @@ pub fn upsert_meta(c: &Connection, item_id: i64, m: &NewMeta) -> Result<()> {
             m.vision_text,
             m.model,
             m.prompt_version,
-            now_ms()
+            now_ms(),
+            m.ocr_text,
+            m.vision_desc
         ],
     )?;
     Ok(())
@@ -469,9 +497,49 @@ pub fn list_chunks(c: &Connection, item_id: i64) -> Result<Vec<ChunkView>> {
             doc_summary: r.get(4)?,
             embed_model: r.get(5)?,
             page: r.get(6)?,
+            images: vec![],
         })
     })?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    let mut chunks = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+    let ids: Vec<i64> = chunks.iter().map(|c| c.id).collect();
+    let mut imgs = chunk_image_refs(c, &ids)?;
+    for ch in &mut chunks {
+        ch.images = imgs.remove(&ch.id).unwrap_or_default();
+    }
+    Ok(chunks)
+}
+
+/// 批量读取切片里出现的图片(含附件路径,用于展示缩略图)
+pub fn chunk_image_refs(
+    c: &Connection,
+    chunk_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<ImageRef>>> {
+    let mut map: std::collections::HashMap<i64, Vec<ImageRef>> = std::collections::HashMap::new();
+    if chunk_ids.is_empty() {
+        return Ok(map);
+    }
+    let sql = format!(
+        "SELECT ci.chunk_id, i.id, i.attachment_path, COALESCE(i.original_name, i.title) \
+         FROM chunk_images ci JOIN items i ON i.id = ci.image_item_id \
+         WHERE ci.chunk_id IN ({}) ORDER BY ci.rowid",
+        vec!["?"; chunk_ids.len()].join(",")
+    );
+    let mut stmt = c.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(chunk_ids.iter()), |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            ImageRef {
+                id: r.get(1)?,
+                attachment_path: r.get(2)?,
+                name: r.get(3)?,
+            },
+        ))
+    })?;
+    for row in rows {
+        let (ch, img) = row?;
+        map.entry(ch).or_default().push(img);
+    }
+    Ok(map)
 }
 
 /// 统计信息
@@ -867,23 +935,157 @@ pub fn move_items(c: &Connection, ids: &[i64], kb_id: i64) -> Result<(Vec<i64>, 
 
 /// 查询一批主记录关联的子记录(如文档里引用的图片)
 ///
-/// 图片关联表(item_links)在后续迁移中引入;表尚不存在时返回空。
+/// 参数: c 连接;parent_ids 主记录 id
+/// 返回: 去重后的子记录 id
 pub fn linked_children(c: &Connection, parent_ids: &[i64]) -> Result<Vec<i64>> {
-    let has_table: i64 = c.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='item_links'",
-        [],
-        |r| r.get(0),
-    )?;
-    if has_table == 0 || parent_ids.is_empty() {
+    if parent_ids.is_empty() {
         return Ok(vec![]);
     }
     let sql = format!(
-        "SELECT DISTINCT child_id FROM item_links WHERE parent_id IN ({})",
+        "SELECT DISTINCT child_id FROM item_links WHERE relation='image' AND parent_id IN ({})",
         vec!["?"; parent_ids.len()].join(",")
     );
     let mut stmt = c.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(parent_ids.iter()), |r| r.get(0))?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 记录间的关联
+///
+/// 参数: parent 主记录;child 子记录;relation image / merged_from;anchor 原文中的引用写法;seq 序号
+pub fn add_link(
+    c: &Connection,
+    parent: i64,
+    child: i64,
+    relation: &str,
+    anchor: &str,
+    seq: i64,
+) -> Result<()> {
+    c.execute(
+        "INSERT OR REPLACE INTO item_links(parent_id, child_id, relation, anchor, seq) VALUES(?1,?2,?3,?4,?5)",
+        params![parent, child, relation, anchor, seq],
+    )?;
+    Ok(())
+}
+
+/// 文档引用的一张图片
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedImage {
+    pub child_id: i64,
+    /// 原文中的引用写法
+    pub anchor: String,
+    pub seq: i64,
+    pub original_name: Option<String>,
+    pub attachment_path: Option<String>,
+    pub ocr_text: Option<String>,
+    pub vision_desc: Option<String>,
+}
+
+/// 某文档引用的全部图片(按出现顺序)
+pub fn images_of(c: &Connection, parent: i64) -> Result<Vec<LinkedImage>> {
+    let mut stmt = c.prepare_cached(
+        "SELECT l.child_id, l.anchor, l.seq, i.original_name, i.attachment_path, m.ocr_text, m.vision_desc \
+         FROM item_links l JOIN items i ON i.id = l.child_id \
+         LEFT JOIN item_meta m ON m.item_id = i.id \
+         WHERE l.parent_id = ?1 AND l.relation = 'image' ORDER BY l.seq",
+    )?;
+    let rows = stmt.query_map([parent], |r| {
+        Ok(LinkedImage {
+            child_id: r.get(0)?,
+            anchor: r.get(1)?,
+            seq: r.get(2)?,
+            original_name: r.get(3)?,
+            attachment_path: r.get(4)?,
+            ocr_text: r.get(5)?,
+            vision_desc: r.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 引用某图片的文档
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentRef {
+    pub id: i64,
+    pub kind: String,
+    pub title: Option<String>,
+    pub original_name: Option<String>,
+}
+
+/// 某图片被哪些文档引用
+pub fn parents_of(c: &Connection, child: i64) -> Result<Vec<ParentRef>> {
+    let mut stmt = c.prepare_cached(
+        "SELECT DISTINCT i.id, i.kind, i.title, i.original_name FROM item_links l \
+         JOIN items i ON i.id = l.parent_id WHERE l.child_id = ?1 AND l.relation = 'image' ORDER BY i.id",
+    )?;
+    let rows = stmt.query_map([child], |r| {
+        Ok(ParentRef {
+            id: r.get(0)?,
+            kind: r.get(1)?,
+            title: r.get(2)?,
+            original_name: r.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 单独写入本机 OCR 文字(空串表示已识别但没有文字,避免反复识别)
+pub fn set_ocr_text(c: &Connection, item_id: i64, text: &str) -> Result<()> {
+    c.execute(
+        "INSERT INTO item_meta(item_id, ocr_text, updated_at) VALUES(?1,?2,?3) \
+         ON CONFLICT(item_id) DO UPDATE SET ocr_text=excluded.ocr_text",
+        params![item_id, text, now_ms()],
+    )?;
+    Ok(())
+}
+
+/// 读取本机 OCR 文字;None 表示尚未识别
+pub fn get_ocr_text(c: &Connection, item_id: i64) -> Result<Option<String>> {
+    Ok(c.query_row(
+        "SELECT ocr_text FROM item_meta WHERE item_id = ?1",
+        [item_id],
+        |r| r.get::<_, Option<String>>(0),
+    )
+    .optional()?
+    .flatten())
+}
+
+/// 用 (切片 id, 图片 id) 关系覆盖写入(旧切片被替换时关系已随外键级联删除)
+pub fn add_chunk_images(c: &Connection, pairs: &[(i64, i64)]) -> Result<()> {
+    for (chunk_id, image_id) in pairs {
+        // 图片可能在处理期间被删除:不存在则忽略
+        c.execute(
+            "INSERT OR IGNORE INTO chunk_images(chunk_id, image_item_id) \
+             SELECT ?1, id FROM items WHERE id = ?2",
+            params![chunk_id, image_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// 用户显式导入了一张此前由文档内嵌自动导入的图片:转为普通图片(不再随文档清理)
+pub fn promote_embedded(c: &Connection, id: i64) -> Result<()> {
+    c.execute("UPDATE items SET embedded = 0 WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// 从候选图片里挑出"内嵌导入且已无任何文档引用"的孤儿图片
+pub fn orphan_embedded(c: &Connection, candidates: &[i64]) -> Result<Vec<i64>> {
+    let mut out = Vec::new();
+    for &id in candidates {
+        let n: i64 = c.query_row(
+            "SELECT count(*) FROM items i WHERE i.id = ?1 AND i.embedded = 1 \
+             AND NOT EXISTS (SELECT 1 FROM item_links l WHERE l.child_id = i.id AND l.relation = 'image')",
+            [id],
+            |r| r.get(0),
+        )?;
+        if n > 0 {
+            out.push(id);
+        }
+    }
+    Ok(out)
 }
 
 /// 统计引用某附件路径的记录数(删除记录时判断能否删除文件)

@@ -9,7 +9,14 @@ fn main() {
             .flag("-fobjc-arc")
             .flag("-Wno-deprecated-declarations")
             .compile("memflow_pdf_ocr");
-        for fw in ["Foundation", "AppKit", "CoreGraphics", "PDFKit", "Vision"] {
+        for fw in [
+            "Foundation",
+            "AppKit",
+            "CoreGraphics",
+            "PDFKit",
+            "Vision",
+            "ImageIO",
+        ] {
             println!("cargo:rustc-link-lib=framework={fw}");
         }
     }

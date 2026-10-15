@@ -10,6 +10,7 @@ use crate::chunker::{self, ChunkOptions, ChunkPiece};
 use crate::core::{permit, CancelToken, Core, EMBED_CONCURRENCY};
 use crate::error::{AppError, Result};
 use crate::extract;
+use crate::images;
 use crate::ollama::OllamaClient;
 use crate::pdf_ingest;
 use crate::prompts::{self, ExtractedMeta, VisionResult, PROMPT_VERSION};
@@ -312,6 +313,23 @@ pub async fn process_item(
             vision_text = Some(t);
         }
     }
+    // 图片的本机 OCR(系统 Vision,不依赖模型):让图中文字可被文字搜索命中
+    let mut ocr_text: Option<String> = None;
+    if item.kind == "image" {
+        if let Some(rel) = item.attachment_path.as_deref() {
+            let local = images::ensure_ocr(core, item_id, rel).await;
+            // 本机识别不到时,退回视觉模型识别出的文字
+            let t = if local.trim().is_empty() {
+                vision
+                    .as_ref()
+                    .map(|v| v.ocr_text.trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                local
+            };
+            ocr_text = Some(t);
+        }
+    }
     if token.is_cancelled() {
         return Err(AppError::Cancelled);
     }
@@ -326,6 +344,17 @@ pub async fn process_item(
             if let Some(v) = vision_text.as_ref().filter(|v| !v.trim().is_empty()) {
                 parts.push(v.trim().to_string());
             }
+            // 视觉模型文本里已包含的文字不重复追加
+            if let Some(o) = ocr_text.as_ref().filter(|o| !o.trim().is_empty()) {
+                let first = o.lines().next().unwrap_or("").trim();
+                let dup = vision_text
+                    .as_ref()
+                    .map(|v| v.contains(first))
+                    .unwrap_or(false);
+                if !dup {
+                    parts.push(format!("图中文字:{}", o.trim()));
+                }
+            }
             if parts.is_empty() {
                 // 没有任何文字线索:仅归档,不产生索引
                 core.db.with_tx(|tx| {
@@ -337,6 +366,19 @@ pub async fn process_item(
             }
             parts.join("\n")
         }
+        // 文档:把引用的图片文字并入对应位置(同时保证每张图都已完成本机 OCR)
+        "document" => {
+            let mut links = core.db.with_read(|c| repo::images_of(c, item_id))?;
+            for l in links.iter().filter(|l| l.ocr_text.is_none()) {
+                if let Some(rel) = l.attachment_path.as_deref() {
+                    images::ensure_ocr(core, l.child_id, rel).await;
+                }
+            }
+            if links.iter().any(|l| l.ocr_text.is_none()) {
+                links = core.db.with_read(|c| repo::images_of(c, item_id))?;
+            }
+            images::inline_images(&content, &links)
+        }
         _ => content.clone(),
     };
 
@@ -346,7 +388,7 @@ pub async fn process_item(
     let use_ai = item.kind != "document" || s.doc_ai_enrich || is_ai_mode(mode);
     let mut ai_used = false;
     // 提取元数据时不带页标记
-    let plain_text = chunker::strip_page_marks(&index_text);
+    let plain_text = images::strip_image_marks(&chunker::strip_page_marks(&index_text));
     let meta: Option<ExtractedMeta> = if let Some(v) = vision.as_ref() {
         ai_used = true;
         Some(clean_meta(ExtractedMeta {
@@ -364,7 +406,7 @@ pub async fn process_item(
     };
 
     // ---- 阶段 5:分块 ----
-    let pieces: Vec<ChunkPiece> =
+    let mut pieces: Vec<ChunkPiece> =
         if item.kind != "document" && index_text.chars().count() <= SINGLE_CHUNK_MAX {
             vec![ChunkPiece {
                 text: index_text.trim().to_string(),
@@ -382,6 +424,8 @@ pub async fn process_item(
     if pieces.is_empty() {
         return Err(AppError::Parse("没有可索引的文本".into()));
     }
+    // 记录每个切片里出现的图片,并从切片文本中剔除标记
+    let chunk_image_ids = images::take_image_marks(&mut pieces);
 
     // ---- 阶段 6:向量化 ----
     let title = item
@@ -469,6 +513,11 @@ pub async fn process_item(
             .map(|m| m.entities.clone())
             .unwrap_or_default(),
         vision_text: vision_text.clone(),
+        ocr_text: ocr_text.clone(),
+        vision_desc: vision
+            .as_ref()
+            .map(|v| v.description.trim().to_string())
+            .filter(|d| !d.is_empty()),
         // 仅 AI 生成的元数据才记录模型名;本地快速索引为 None
         model: if !ai_used {
             None
@@ -483,6 +532,12 @@ pub async fn process_item(
         // 记录可能在处理期间被删除:此时外键会报错,视为无需处理
         repo::ensure_item_exists(tx, item_id)?;
         let ids = repo::replace_chunks(tx, item_id, &new_chunks)?;
+        let pairs: Vec<(i64, i64)> = ids
+            .iter()
+            .zip(chunk_image_ids.iter())
+            .flat_map(|(c, imgs)| imgs.iter().map(move |i| (*c, *i)))
+            .collect();
+        repo::add_chunk_images(tx, &pairs)?;
         repo::upsert_meta(tx, item_id, &new_meta)?;
         repo::set_item_status(tx, item_id, "done", None)?;
         Ok(ids)

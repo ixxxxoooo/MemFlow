@@ -63,6 +63,10 @@ pub struct AppStatus {
 pub struct ItemDetail {
     pub item: ItemView,
     pub chunks: Vec<ChunkView>,
+    /// 文档引用的图片(按出现顺序)
+    pub images: Vec<repo::LinkedImage>,
+    /// 图片被哪些文档引用
+    pub parents: Vec<repo::ParentRef>,
 }
 
 /// 获取应用状态(Ollama、模型、统计、队列、设置)
@@ -403,7 +407,14 @@ pub fn get_item(core: S<'_>, id: i64) -> Result<ItemDetail> {
     core.db.with_read(|c| {
         let item = repo::get_item(c, id)?.ok_or_else(|| AppError::Invalid("记录不存在".into()))?;
         let chunks = repo::list_chunks(c, id)?;
-        Ok(ItemDetail { item, chunks })
+        let images = repo::images_of(c, id)?;
+        let parents = repo::parents_of(c, id)?;
+        Ok(ItemDetail {
+            item,
+            chunks,
+            images,
+            parents,
+        })
     })
 }
 

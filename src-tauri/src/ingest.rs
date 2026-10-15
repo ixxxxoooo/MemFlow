@@ -7,12 +7,13 @@ use crate::core::Core;
 use crate::error::{AppError, Result};
 use crate::extract::{self, FileKind};
 use crate::folder;
+use crate::images;
 use crate::queue;
 use crate::repo::{self, NewItem};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -50,6 +51,8 @@ pub struct CaptureResult {
     pub skipped: Vec<String>,
     /// 被跳过的总数
     pub skipped_count: usize,
+    /// created 中由文档引用/内嵌自动导入并关联的图片数
+    pub linked_images: usize,
 }
 
 /// 已存储的附件信息
@@ -63,6 +66,60 @@ struct StoredFile {
 /// 待写入的记录
 struct Prepared {
     item: NewItem,
+    /// 该文档引用的图片
+    links: Vec<PendingLink>,
+}
+
+/// 文档里的一处图片引用(写入前,子记录可能尚未入库)
+struct PendingLink {
+    child: ChildRef,
+    /// 原文中的引用写法
+    anchor: String,
+}
+
+/// 关联的子记录:库内已有,或本批次待写入的第几条
+#[derive(Debug, Clone, Copy)]
+enum ChildRef {
+    Existing(i64),
+    Pending(usize),
+}
+
+/// 一次导入的累积状态
+#[derive(Default)]
+struct Batch {
+    prepared: Vec<Prepared>,
+    /// 本次导入已见过的 (内容哈希, 类型) → 对应的待写入记录,同一批里内容相同的文件只导入一份
+    seen: HashMap<(String, String), ChildRef>,
+    /// 被跳过内容的原因统计
+    skip_map: BTreeMap<String, usize>,
+    has_image: bool,
+    has_doc: bool,
+}
+
+impl Batch {
+    fn skip(&mut self, reason: impl Into<String>) {
+        *self.skip_map.entry(reason.into()).or_insert(0) += 1;
+    }
+}
+
+/// 登记图片的结果
+enum Registered {
+    /// 新建了待写入的图片记录
+    Created(ChildRef),
+    /// 知识库里已有同内容图片
+    Existing(i64),
+    /// 本批次已登记过同内容图片
+    SeenInBatch(ChildRef),
+}
+
+impl Registered {
+    /// 对应的子记录
+    fn child(&self) -> ChildRef {
+        match *self {
+            Registered::Created(c) | Registered::SeenInBatch(c) => c,
+            Registered::Existing(id) => ChildRef::Existing(id),
+        }
+    }
 }
 
 /// 计算文件 SHA-256(流式)
@@ -153,7 +210,7 @@ pub async fn stage_bytes(core: &Core, name: &str, bytes: Vec<u8>) -> Result<Stri
 /// 单个文件的处理结果
 enum FileOutcome {
     /// 需要新建的记录
-    New(Prepared),
+    New(Box<Prepared>),
     /// 知识库内已存在相同文件,给出已有记录 id
     Duplicate(i64),
 }
@@ -168,6 +225,7 @@ async fn prepare_file(
     label: &str,
     kb_id: i64,
     source_path: Option<String>,
+    embedded: bool,
 ) -> Result<FileOutcome> {
     let meta = tokio::fs::metadata(path)
         .await
@@ -215,7 +273,7 @@ async fn prepare_file(
         .unwrap_or("")
         .to_string();
     let is_image = kind == FileKind::Image;
-    Ok(FileOutcome::New(Prepared {
+    Ok(FileOutcome::New(Box::new(Prepared {
         item: NewItem {
             kind: kind_name.into(),
             title: if is_image { None } else { Some(stem) },
@@ -226,8 +284,146 @@ async fn prepare_file(
             content_hash: Some(stored.hash),
             kb_id: Some(kb_id),
             source_path,
+            embedded,
         },
-    }))
+        links: vec![],
+    })))
+}
+
+/// 登记一张图片:库内已有则复用,本批次已有则合并,否则加入待写入列表
+///
+/// 参数: embedded 为 true 表示由文档引用自动导入(最后一个引用它的文档被删除时一并清理)
+async fn register_image(
+    core: &Arc<Core>,
+    batch: &mut Batch,
+    path: &Path,
+    kb_id: i64,
+    embedded: bool,
+) -> Result<Registered> {
+    let label = path.to_string_lossy().into_owned();
+    match prepare_file(core, path, &label, kb_id, None, embedded).await? {
+        FileOutcome::Duplicate(id) => {
+            // 用户显式导入了此前自动导入的图片:转为普通图片
+            if !embedded {
+                core.db.with(|c| repo::promote_embedded(c, id))?;
+            }
+            Ok(Registered::Existing(id))
+        }
+        FileOutcome::New(pr) => {
+            let key = (
+                pr.item.content_hash.clone().unwrap_or_default(),
+                "image".to_string(),
+            );
+            if let Some(slot) = batch.seen.get(&key).copied() {
+                // 显式导入时,原先自动导入的图片转为普通图片
+                if !embedded {
+                    if let ChildRef::Pending(i) = slot {
+                        batch.prepared[i].item.embedded = false;
+                    }
+                }
+                return Ok(Registered::SeenInBatch(slot));
+            }
+            let idx = batch.prepared.len();
+            batch.prepared.push(*pr);
+            batch.seen.insert(key, ChildRef::Pending(idx));
+            batch.has_image = true;
+            Ok(Registered::Created(ChildRef::Pending(idx)))
+        }
+    }
+}
+
+/// 收集文档引用/内嵌的图片并登记为待写入记录
+///
+/// - md / html:解析 `![](相对路径)` 与 `<img src>`,相对文档所在目录解析(此时原始路径还在,
+///   入库后附件按哈希重命名,相对路径信息会丢失,所以必须在导入时完成)
+/// - docx:按正文出现顺序读取 `word/media` 内嵌图片
+///
+/// 返回: 文档到图片的关联(按出现顺序、同一引用写法只保留一条)
+async fn collect_doc_images(
+    core: &Arc<Core>,
+    path: &Path,
+    kb_id: i64,
+    batch: &mut Batch,
+) -> Vec<PendingLink> {
+    let ext = extract::ext_lower(path);
+    let mut links: Vec<PendingLink> = Vec::new();
+    match ext.as_str() {
+        "md" | "markdown" | "html" | "htm" => {
+            let Ok(bytes) = tokio::fs::read(path).await else {
+                return links;
+            };
+            // 过大的文本不扫描引用(上限 20MB)
+            if bytes.len() > 20 * 1024 * 1024 {
+                return links;
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let base = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+            let mut anchors: HashSet<String> = HashSet::new();
+            for r in images::scan_refs(&text) {
+                if images::is_remote(&r.src) || !anchors.insert(r.src.clone()) {
+                    continue;
+                }
+                if links.len() >= images::MAX_IMAGES_PER_DOC {
+                    batch.skip(format!(
+                        "文档引用图片过多,仅导入前 {} 张",
+                        images::MAX_IMAGES_PER_DOC
+                    ));
+                    break;
+                }
+                let Some(img) = images::resolve_local(&base, &r.src) else {
+                    batch.skip("引用的图片找不到");
+                    continue;
+                };
+                match register_image(core, batch, &img, kb_id, true).await {
+                    Ok(reg) => links.push(PendingLink {
+                        child: reg.child(),
+                        anchor: r.src.clone(),
+                    }),
+                    Err(e) => batch.skip(e.to_string()),
+                }
+            }
+        }
+        "docx" => {
+            let p = path.to_path_buf();
+            let Ok(Ok((imgs, skipped))) =
+                tokio::task::spawn_blocking(move || images::docx_images(&p)).await
+            else {
+                return links;
+            };
+            for s in skipped {
+                batch.skip(s);
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("文档")
+                .to_string();
+            for img in imgs {
+                // 写到暂存目录再走统一的校验/入库流程(入库后暂存文件会被清理)
+                let dir =
+                    core.paths
+                        .tmp
+                        .join(format!("emb-{}-{}", crate::db::now_ms(), links.len()));
+                if tokio::fs::create_dir_all(&dir).await.is_err() {
+                    continue;
+                }
+                let file = dir.join(format!("{stem}_{}", img.name));
+                let wrote = tokio::fs::write(&file, &img.bytes).await.is_ok();
+                if wrote {
+                    match register_image(core, batch, &file, kb_id, true).await {
+                        Ok(reg) => links.push(PendingLink {
+                            child: reg.child(),
+                            anchor: img.anchor.clone(),
+                        }),
+                        Err(e) => batch.skip(e.to_string()),
+                    }
+                }
+                let _ = tokio::fs::remove_dir_all(&dir).await;
+            }
+        }
+        _ => {}
+    }
+    links
 }
 
 /// 处理闪念提交:文字 → 笔记;图片 → 图片记录(文字作为说明);文档 → 文档记录
@@ -252,13 +448,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
     let kb_id = input.kb_id.unwrap_or(crate::db::DEFAULT_KB_ID);
     core.db.with(|c| repo::ensure_kb_exists(c, kb_id))?;
     let mut result = CaptureResult::default();
-    let mut prepared: Vec<Prepared> = Vec::new();
-    let mut has_image = false;
-    let mut has_doc = false;
-
-    // 本次导入已见过的 (内容哈希, 类型):同一批里内容相同的文件只导入一份
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut skip_map: BTreeMap<String, usize> = BTreeMap::new();
+    let mut batch = Batch::default();
 
     for p in &input.paths {
         let path = PathBuf::from(p);
@@ -273,7 +463,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
                 .await
                 .map_err(|e| AppError::Other(e.to_string()))?;
             for (reason, n) in &scan.skipped {
-                *skip_map.entry(reason.clone()).or_insert(0) += n;
+                *batch.skip_map.entry(reason.clone()).or_insert(0) += n;
             }
             scan.files
                 .into_iter()
@@ -285,38 +475,95 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
         let from_folder = is_dir;
         for (path, rel) in targets {
             let label = path.to_string_lossy().into_owned();
-            match prepare_file(core, &path, &label, kb_id, rel).await {
-                Ok(FileOutcome::New(pr)) => {
-                    let key = (
-                        pr.item.content_hash.clone().unwrap_or_default(),
-                        pr.item.kind.clone(),
-                    );
-                    if !seen.insert(key) {
-                        *skip_map
-                            .entry("与本次导入的另一文件内容相同".to_string())
-                            .or_insert(0) += 1;
-                        continue;
+            let is_image = extract::classify(&path) == FileKind::Image;
+            let outcome: Result<()> = async {
+                if is_image {
+                    // 显式导入的图片与文档引用的图片共用登记逻辑(库内/批内按哈希去重)
+                    let meta = tokio::fs::metadata(&path)
+                        .await
+                        .map_err(|_| AppError::Invalid(format!("文件不存在: {label}")))?;
+                    if !meta.is_file() {
+                        return Err(AppError::Invalid(format!("不是文件: {label}")));
                     }
-                    has_image |= pr.item.kind == "image";
-                    has_doc |= pr.item.kind == "document";
-                    prepared.push(pr);
+                    match prepare_file(core, &path, &label, kb_id, rel.clone(), false).await? {
+                        FileOutcome::Duplicate(id) => {
+                            core.db.with(|c| repo::promote_embedded(c, id))?;
+                            result.duplicates.push(id);
+                        }
+                        FileOutcome::New(mut pr) => {
+                            let key = (
+                                pr.item.content_hash.clone().unwrap_or_default(),
+                                "image".to_string(),
+                            );
+                            match batch.seen.get(&key).copied() {
+                                Some(ChildRef::Pending(i)) => {
+                                    // 先被文档引用登记过:转为普通图片并补上来源路径
+                                    if batch.prepared[i].item.embedded {
+                                        batch.prepared[i].item.embedded = false;
+                                        batch.prepared[i].item.source_path = rel.clone();
+                                    } else {
+                                        batch.skip("与本次导入的另一文件内容相同");
+                                    }
+                                }
+                                Some(ChildRef::Existing(_)) => {
+                                    batch.skip("与本次导入的另一文件内容相同")
+                                }
+                                None => {
+                                    pr.item.embedded = false;
+                                    let idx = batch.prepared.len();
+                                    batch.seen.insert(key, ChildRef::Pending(idx));
+                                    batch.has_image = true;
+                                    batch.prepared.push(*pr);
+                                }
+                            }
+                        }
+                    }
+                    return Ok(());
                 }
-                Ok(FileOutcome::Duplicate(id)) => result.duplicates.push(id),
+                match prepare_file(core, &path, &label, kb_id, rel.clone(), false).await? {
+                    FileOutcome::New(mut pr) => {
+                        let key = (
+                            pr.item.content_hash.clone().unwrap_or_default(),
+                            pr.item.kind.clone(),
+                        );
+                        if batch.seen.contains_key(&key) {
+                            batch.skip("与本次导入的另一文件内容相同");
+                            return Ok(());
+                        }
+                        // 先收集文档引用的图片(子记录排在文档之前入库)
+                        pr.links = collect_doc_images(core, &path, kb_id, &mut batch).await;
+                        batch
+                            .seen
+                            .insert(key, ChildRef::Pending(batch.prepared.len()));
+                        batch.has_doc |= pr.item.kind == "document";
+                        batch.prepared.push(*pr);
+                    }
+                    FileOutcome::Duplicate(id) => result.duplicates.push(id),
+                }
+                Ok(())
+            }
+            .await;
+            match outcome {
+                Ok(()) => {}
                 // 文件夹里的个别坏文件不算失败,归入"跳过"并给出原因
-                Err(e) if from_folder => {
-                    *skip_map.entry(e.to_string()).or_insert(0) += 1;
-                }
+                Err(e) if from_folder => batch.skip(e.to_string()),
                 Err(e) => result.errors.push(e.to_string()),
             }
         }
     }
-    result.skipped_count = skip_map.values().sum();
-    result.skipped = folder::skip_lines(&skip_map);
+    result.skipped_count = batch.skip_map.values().sum();
+    result.skipped = folder::skip_lines(&batch.skip_map);
+    let (has_image, has_doc) = (batch.has_image, batch.has_doc);
+    let mut prepared = std::mem::take(&mut batch.prepared);
 
     // 文字的归属:有图片则作为图片说明;否则(或同时有文档)独立成笔记
     if !text.is_empty() {
         if has_image {
-            for pr in prepared.iter_mut().filter(|p| p.item.kind == "image") {
+            // 文字作为说明只附在显式导入的图片上(文档里自动导入的图片不加)
+            for pr in prepared
+                .iter_mut()
+                .filter(|p| p.item.kind == "image" && !p.item.embedded)
+            {
                 pr.item.content = text.clone();
             }
         }
@@ -334,6 +581,7 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
                         kb_id: Some(kb_id),
                         ..Default::default()
                     },
+                    links: vec![],
                 });
             }
         }
@@ -351,8 +599,19 @@ pub async fn capture(core: &Arc<Core>, input: CaptureInput) -> Result<CaptureRes
             queue::enqueue_item(tx, id, "ingest")?;
             ids.push(id);
         }
+        // 文档 → 图片的关联(子记录一定排在文档之前,此时 id 已确定)
+        for (i, pr) in prepared.iter().enumerate() {
+            for (seq, l) in pr.links.iter().enumerate() {
+                let child = match l.child {
+                    ChildRef::Existing(id) => id,
+                    ChildRef::Pending(idx) => ids[idx],
+                };
+                repo::add_link(tx, ids[i], child, "image", &l.anchor, seq as i64)?;
+            }
+        }
         Ok(ids)
     })?;
+    result.linked_images = prepared.iter().filter(|p| p.item.embedded).count();
     result.created = ids;
     core.wake.notify_one();
     for id in &result.created {
@@ -397,11 +656,18 @@ pub fn update_content(core: &Arc<Core>, id: i64, content: &str) -> Result<()> {
 /// 返回: 实际删除的条数
 pub async fn delete_items(core: &Arc<Core>, ids: &[i64]) -> Result<usize> {
     let mut n = 0;
-    for &id in ids {
+    // 待删除队列:删除文档后,只被它引用的内嵌图片会成为孤儿,一并追加到队列
+    let mut todo: std::collections::VecDeque<i64> = ids.iter().copied().collect();
+    let mut done: HashSet<i64> = HashSet::new();
+    while let Some(id) = todo.pop_front() {
+        if !done.insert(id) {
+            continue;
+        }
         queue::cancel_item(core, id)?;
         let attachment = core
             .db
             .with(|c| Ok(repo::get_item(c, id)?.and_then(|i| i.attachment_path)))?;
+        let children = core.db.with(|c| repo::linked_children(c, &[id]))?;
         let deleted = core.db.with_tx(|tx| {
             let exists: i64 =
                 tx.query_row("SELECT count(*) FROM items WHERE id=?1", [id], |r| r.get(0))?;
@@ -422,6 +688,12 @@ pub async fn delete_items(core: &Arc<Core>, ids: &[i64]) -> Result<usize> {
                 if let Ok(abs) = attachment_abs(core, &rel) {
                     let _ = tokio::fs::remove_file(abs).await;
                 }
+            }
+        }
+        // 关联已随外键级联删除:挑出"内嵌导入且不再被任何文档引用"的图片
+        if !children.is_empty() {
+            for orphan in core.db.with(|c| repo::orphan_embedded(c, &children))? {
+                todo.push_back(orphan);
             }
         }
         core.emit("item-deleted", json!({ "id": id }));

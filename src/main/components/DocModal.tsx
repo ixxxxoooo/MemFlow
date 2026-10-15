@@ -1,9 +1,11 @@
 // @author ygw
 // 文档弹窗:预览(Markdown 渲染)/ 切片列表 / 在线编辑(md 所见即所得,txt 纯文本),保存后自动快速重新索引
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
+import { buildImageMap } from "../../lib/docImages";
 import { editModeOf, renderAsMarkdown } from "../../lib/docKind";
 import { pageLabel, stripPageMarks } from "../../lib/pageMarks";
 import { fmtDate, fmtTime } from "../../lib/format";
@@ -11,6 +13,7 @@ import { isMissingItemError } from "../../lib/itemErrors";
 import { useApp } from "../../lib/store";
 import type { ItemDetail } from "../../lib/types";
 import { CloseIcon, EditIcon, RefreshIcon, SparkleIcon, TrashIcon } from "./icons";
+import { ImageThumbs } from "./ImageThumbs";
 import { Markdown } from "./Markdown";
 
 // 编辑器体积较大,仅在进入编辑时按需加载
@@ -19,7 +22,8 @@ const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
 type Tab = "preview" | "chunks";
 
 export function DocModal() {
-  const { docModal, closeDocModal, itemsDeleted, toast, dataVersion, bumpData, refreshStatus } = useApp();
+  const { docModal, closeDocModal, itemsDeleted, toast, dataVersion, bumpData, refreshStatus, openDrawer } = useApp();
+  const dataDir = useApp((s) => s.status?.dataDir);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("preview");
@@ -29,6 +33,11 @@ export function DocModal() {
   const hlRef = useRef<HTMLDivElement>(null);
 
   const it = detail?.item;
+  // 正文里的图片写法 → 导入时关联的图片(预览直接内联显示)
+  const imageMap = useMemo(
+    () => buildImageMap(detail?.images ?? [], (rel) => convertFileSrc(`${dataDir}/attachments/${rel}`)),
+    [detail?.images, dataDir],
+  );
   const mode = editModeOf(it?.originalName);
   const plainContent = it ? stripPageMarks(it.content) : "";
   const dirty = editing && !!it && draft !== plainContent;
@@ -132,6 +141,7 @@ export function DocModal() {
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg-dim)]">
                 <span>{fmtDate(it.createdAt)} {fmtTime(it.createdAt)}</span>
                 <span>{it.chunkCount} 个切片</span>
+                {(detail?.images.length ?? 0) > 0 && <span title="导入时自动识别并关联,图中文字可被搜索">{detail?.images.length} 张关联图片</span>}
                 <span className={it.status === "failed" ? "text-[var(--err)]" : it.status === "done" ? "text-[var(--ok)]" : ""}>
                   {it.status === "done" ? (aiDone ? "已索引 · 已 AI 解读" : "已索引") : it.status === "failed" ? "处理失败" : "处理中…"}
                 </span>
@@ -210,7 +220,7 @@ export function DocModal() {
                 </div>
               )}
               {renderAsMarkdown(it.originalName) ? (
-                <Markdown text={plainContent} />
+                <Markdown text={plainContent} images={imageMap} onImageClick={(id) => openDrawer(id)} />
               ) : (
                 <div className="selectable whitespace-pre-wrap text-[14.5px] leading-[1.75]">{plainContent}</div>
               )}
@@ -225,6 +235,7 @@ export function DocModal() {
                   <div key={c.id} ref={hl ? hlRef : undefined} className={`rounded-lg border p-3 ${hl ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--line)]"}`}>
                     <div className="mb-1 text-[11px] text-[var(--fg-faint)]">#{c.seq + 1}{c.heading ? ` · ${c.heading}` : ""}{pageLabel(c.page)}</div>
                     <div className="selectable whitespace-pre-wrap text-[13px] leading-relaxed">{c.text}</div>
+                    <ImageThumbs images={c.images} size={64} />
                   </div>
                 );
               })}

@@ -17,6 +17,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// 请求行里表示"图片文件 OCR"的类型标记
+const IMAGE_TAG: &str = "IMG";
 /// 子进程命令行标志
 pub const WORKER_FLAG: &str = "--ocr-worker";
 /// 单页识别最长等待(含首次编译神经引擎模型)
@@ -119,6 +121,18 @@ fn spawn() -> Option<Conn> {
 /// 参数: path PDF 路径;idx 页下标
 /// 返回: 识别结果,见 `WorkerResult`
 pub fn ocr_via_worker(path: &Path, idx: usize) -> WorkerResult {
+    request(path, &idx.to_string())
+}
+
+/// 请求子进程识别一张图片文件
+pub fn ocr_image_via_worker(path: &Path) -> WorkerResult {
+    request(path, IMAGE_TAG)
+}
+
+/// 向子进程发送一条识别请求(带失败换进程重试)
+///
+/// 参数: path 文件路径;tag 请求类型,PDF 为页下标,图片为 `IMAGE_TAG`
+fn request(path: &Path, tag: &str) -> WorkerResult {
     // 路径含制表符/换行的极端情况不走子进程
     let p = path.to_string_lossy().into_owned();
     if p.contains(['\t', '\n', '\r']) {
@@ -133,7 +147,7 @@ pub fn ocr_via_worker(path: &Path, idx: usize) -> WorkerResult {
             }
         }
         let conn = guard.as_mut().expect("刚刚创建");
-        let sent = writeln!(conn.stdin, "{idx}\t{p}").and_then(|_| conn.stdin.flush());
+        let sent = writeln!(conn.stdin, "{tag}\t{p}").and_then(|_| conn.stdin.flush());
         let reply = if sent.is_ok() {
             conn.replies
                 .recv_timeout(REPLY_TIMEOUT)
@@ -165,7 +179,7 @@ pub fn ocr_via_worker(path: &Path, idx: usize) -> WorkerResult {
 
 /// 若本进程是被拉起的 OCR 子进程,则运行识别循环并返回 true(调用方应直接退出)。
 ///
-/// 协议:stdin 每行 `页下标<TAB>PDF 路径`;stdout 每行 `OK <json>` 或 `ERR`。
+/// 协议:stdin 每行 `页下标<TAB>PDF 路径` 或 `IMG<TAB>图片路径`;stdout 每行 `OK <json>` 或 `ERR`。
 pub fn maybe_run_worker() -> bool {
     if std::env::args().nth(1).as_deref() != Some(WORKER_FLAG) {
         return false;
@@ -197,9 +211,15 @@ fn run_worker() {
             Err(_) => return, // 空闲超时或父进程关闭了 stdin
         };
         let mut parts = line.splitn(2, '\t');
-        let idx = parts.next().and_then(|x| x.parse::<usize>().ok());
+        let tag = parts.next().unwrap_or("").to_string();
+        let idx = tag.parse::<usize>().ok();
         let path = parts.next().map(str::to_string);
         let reply = match (idx, path) {
+            (None, Some(path)) if tag == IMAGE_TAG => {
+                crate::pdf_native::image_ocr_json_direct(Path::new(&path))
+                    .map(|j| format!("OK {}", j.replace(['\n', '\r'], " ")))
+                    .unwrap_or_else(|| "ERR".to_string())
+            }
             (Some(idx), Some(path)) => {
                 if cached.as_ref().map(|(p, _)| p != &path).unwrap_or(true) {
                     cached = PdfDoc::open(Path::new(&path)).map(|d| (path.clone(), d));

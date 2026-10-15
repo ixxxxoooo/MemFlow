@@ -19,7 +19,11 @@ export interface ImportSummary {
  */
 export function summarizeCapture(r: CaptureResult, kbName?: string | null, noun = "项"): ImportSummary {
   const parts: string[] = [];
-  if (r.created.length) parts.push(`导入 ${r.created.length} ${noun}${kbName ? `到「${kbName}」` : ""}`);
+  // created 里包含文档引用而自动导入的图片:单独计数,不混进"导入 N 项"
+  const linked = r.linkedImages ?? 0;
+  const main = r.created.length - linked;
+  if (main > 0) parts.push(`导入 ${main} ${noun}${kbName ? `到「${kbName}」` : ""}`);
+  if (linked > 0) parts.push(`关联图片 ${linked}`);
   if (r.duplicates.length) parts.push(`重复 ${r.duplicates.length}`);
   if (r.skippedCount) parts.push(`跳过 ${r.skippedCount}`);
   if (r.errors.length) parts.push(`失败 ${r.errors.length}`);

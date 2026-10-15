@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { skipDetailLine, summarizeCapture } from "./importSummary";
 import type { CaptureResult } from "./types";
 
-const base: CaptureResult = { created: [], duplicates: [], errors: [], skipped: [], skippedCount: 0 };
+const base: CaptureResult = { created: [], duplicates: [], errors: [], skipped: [], skippedCount: 0, linkedImages: 0 };
 
 describe("summarizeCapture", () => {
   it("导入、重复、跳过一起汇总", () => {
@@ -11,6 +11,11 @@ describe("summarizeCapture", () => {
     expect(s.text).toBe("导入 3 项到「工作」、重复 1、跳过 2");
     expect(s.kind).toBe("ok");
     expect(s.detail).toEqual(["不支持的类型(.zip) ×2"]);
+  });
+  it("文档引用的图片单独计数", () => {
+    const s = summarizeCapture({ ...base, created: [1, 2, 3], linkedImages: 2 }, "工作");
+    expect(s.text).toBe("导入 1 项到「工作」、关联图片 2");
+    expect(s.kind).toBe("ok");
   });
   it("有失败时为 err", () => {
     expect(summarizeCapture({ ...base, errors: ["x"] }).kind).toBe("err");

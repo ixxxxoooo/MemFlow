@@ -9,6 +9,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#import <ImageIO/ImageIO.h>
 #import <PDFKit/PDFKit.h>
 #import <Vision/Vision.h>
 #include <stdlib.h>
@@ -88,8 +89,52 @@ static CGImageRef mf_render_page(PDFPage *page, double max_edge) {
     return img;
 }
 
-// 对页面做 OCR,返回 JSON: {"lines":[{"t":"文字","x":..,"y":..,"w":..,"h":..},...]}
-// 坐标为 Vision 的归一化坐标(原点左下角)。失败返回 NULL。
+// 对 CGImage 做 OCR,返回 JSON: {"lines":[{"t":"文字","x":..,"y":..,"w":..,"h":..},...]}
+// 坐标为 Vision 的归一化坐标(原点左下角)。Vision 失败返回 NULL。
+static char *mf_ocr_cgimage_json(CGImageRef img) {
+    VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
+    req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    req.usesLanguageCorrection = YES;
+    if (@available(macOS 13.0, *)) {
+        req.revision = VNRecognizeTextRequestRevision3;
+        // 优先中文与英文;只保留当前系统支持的语言,避免设置不支持的语言导致失败
+        NSArray<NSString *> *want = @[ @"zh-Hans", @"zh-Hant", @"en-US" ];
+        NSError *langErr = nil;
+        NSArray<NSString *> *sup = [req supportedRecognitionLanguagesAndReturnError:&langErr];
+        if (sup != nil) {
+            NSMutableArray *use = [NSMutableArray array];
+            for (NSString *l in want) if ([sup containsObject:l]) [use addObject:l];
+            if (use.count > 0) req.recognitionLanguages = use;
+        }
+    }
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:img options:@{}];
+    NSError *err = nil;
+    BOOL ok = [handler performRequests:@[ req ] error:&err];
+    if (!ok) {
+        NSLog(@"[memflow] Vision OCR 失败: %@", err);
+        return NULL;
+    }
+
+    NSMutableArray *lines = [NSMutableArray array];
+    for (VNRecognizedTextObservation *o in req.results) {
+        VNRecognizedText *top = [[o topCandidates:1] firstObject];
+        if (top == nil || top.string.length == 0) continue;
+        CGRect b = o.boundingBox;
+        [lines addObject:@{
+            @"t" : top.string,
+            @"x" : @(b.origin.x),
+            @"y" : @(b.origin.y),
+            @"w" : @(b.size.width),
+            @"h" : @(b.size.height),
+        }];
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{ @"lines" : lines } options:0 error:nil];
+    if (data == nil) return NULL;
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    return mf_dup_utf8(json);
+}
+
+// 对页面做 OCR,返回 JSON。失败返回 NULL。
 char *mf_pdf_page_ocr_json(void *handle, long idx) {
     @autoreleasepool {
         if (handle == NULL) return NULL;
@@ -98,48 +143,55 @@ char *mf_pdf_page_ocr_json(void *handle, long idx) {
         if (page == nil) return NULL;
         CGImageRef img = mf_render_page(page, 2400.0);
         if (img == NULL) return NULL;
-
-        VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
-        req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
-        req.usesLanguageCorrection = YES;
-        if (@available(macOS 13.0, *)) {
-            req.revision = VNRecognizeTextRequestRevision3;
-            // 优先中文与英文;只保留当前系统支持的语言,避免设置不支持的语言导致失败
-            NSArray<NSString *> *want = @[ @"zh-Hans", @"zh-Hant", @"en-US" ];
-            NSError *langErr = nil;
-            NSArray<NSString *> *sup = [req supportedRecognitionLanguagesAndReturnError:&langErr];
-            if (sup != nil) {
-                NSMutableArray *use = [NSMutableArray array];
-                for (NSString *l in want) if ([sup containsObject:l]) [use addObject:l];
-                if (use.count > 0) req.recognitionLanguages = use;
-            }
-        }
-        VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:img options:@{}];
-        NSError *err = nil;
-        BOOL ok = [handler performRequests:@[ req ] error:&err];
+        char *out = mf_ocr_cgimage_json(img);
         CGImageRelease(img);
-        if (!ok) {
-            NSLog(@"[memflow] Vision OCR 失败: %@", err);
+        return out;
+    }
+}
+
+// 对图片文件做 OCR(支持 png/jpg/webp/gif/bmp/heic 等 ImageIO 能解码的格式)。
+// 应用 EXIF 方向、长边限制到 4096 像素、透明背景铺白底。
+// 无法解码的文件返回 {"lines":[],"error":"decode"}(属于确定性失败,调用方不应重试);
+// Vision 自身失败返回 NULL(可换进程重试)。
+char *mf_image_ocr_json(const char *path) {
+    @autoreleasepool {
+        if (path == NULL) return NULL;
+        NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
+        CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
+        if (src == NULL) return strdup("{\"lines\":[],\"error\":\"decode\"}");
+        NSDictionary *opts = @{
+            (id)kCGImageSourceCreateThumbnailFromImageAlways : @YES,
+            (id)kCGImageSourceCreateThumbnailWithTransform : @YES,
+            (id)kCGImageSourceShouldCacheImmediately : @YES,
+            (id)kCGImageSourceThumbnailMaxPixelSize : @(4096),
+        };
+        CGImageRef raw = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)opts);
+        CFRelease(src);
+        if (raw == NULL) return strdup("{\"lines\":[],\"error\":\"decode\"}");
+        size_t w = CGImageGetWidth(raw), h = CGImageGetHeight(raw);
+        if (w < 2 || h < 2) {
+            CGImageRelease(raw);
+            return strdup("{\"lines\":[]}");
+        }
+        // 铺白底:透明 PNG 里的深色文字在黑底上无法识别
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, 0, cs,
+            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        CGColorSpaceRelease(cs);
+        if (ctx == NULL) {
+            CGImageRelease(raw);
             return NULL;
         }
-
-        NSMutableArray *lines = [NSMutableArray array];
-        for (VNRecognizedTextObservation *o in req.results) {
-            VNRecognizedText *top = [[o topCandidates:1] firstObject];
-            if (top == nil || top.string.length == 0) continue;
-            CGRect b = o.boundingBox;
-            [lines addObject:@{
-                @"t" : top.string,
-                @"x" : @(b.origin.x),
-                @"y" : @(b.origin.y),
-                @"w" : @(b.size.width),
-                @"h" : @(b.size.height),
-            }];
-        }
-        NSData *data = [NSJSONSerialization dataWithJSONObject:@{ @"lines" : lines } options:0 error:nil];
-        if (data == nil) return NULL;
-        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        return mf_dup_utf8(json);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
+        CGContextFillRect(ctx, CGRectMake(0, 0, w, h));
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), raw);
+        CGImageRelease(raw);
+        CGImageRef flat = CGBitmapContextCreateImage(ctx);
+        CGContextRelease(ctx);
+        if (flat == NULL) return NULL;
+        char *out = mf_ocr_cgimage_json(flat);
+        CGImageRelease(flat);
+        return out;
     }
 }
 

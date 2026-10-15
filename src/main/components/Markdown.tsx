@@ -5,6 +5,7 @@ import { memo, useMemo, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { linkCitations } from "../../lib/citations";
+import { lookupImage, type DocImage } from "../../lib/docImages";
 import { isFenceClosed } from "../../lib/markdownFence";
 import type { Source } from "../../lib/types";
 import { MermaidCard } from "./MermaidCard";
@@ -14,14 +15,18 @@ interface Props {
   sources?: Source[];
   streaming?: boolean;
   onCite?: (s: Source) => void;
+  /** 文档预览:正文里的图片写法 → 关联的图片记录 */
+  images?: Map<string, DocImage>;
+  /** 点击文档里的图片 */
+  onImageClick?: (id: number) => void;
 }
 
-export const Markdown = memo(function Markdown({ text, sources = [], streaming, onCite }: Props) {
+export const Markdown = memo(function Markdown({ text, sources = [], streaming, onCite, images, onImageClick }: Props) {
   const content = useMemo(() => linkCitations(text, sources.length), [text, sources.length]);
   // 渲染器通过 ref 读取最新值,使 components 引用永远稳定;
   // 否则 sources/onCite 一变,react-markdown 会卸载重建所有自定义节点(流程图因此闪烁、重复渲染)
-  const live = useRef({ content, sources, streaming: !!streaming, onCite });
-  live.current = { content, sources, streaming: !!streaming, onCite };
+  const live = useRef({ content, sources, streaming: !!streaming, onCite, images, onImageClick });
+  live.current = { content, sources, streaming: !!streaming, onCite, images, onImageClick };
 
   const components = useMemo<Components>(
     () => ({
@@ -41,6 +46,22 @@ export const Markdown = memo(function Markdown({ text, sources = [], streaming, 
           );
         }
         return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+      },
+      img({ src, alt }) {
+        const hit = lookupImage(live.current.images, src);
+        if (!hit) {
+          // 找不到关联图片(远程图、已缺失):只保留替代文字,不发起网络请求
+          return alt ? <span className="text-[var(--fg-faint)]">[图片:{alt}]</span> : null;
+        }
+        return (
+          <img
+            src={hit.url}
+            alt={alt ?? hit.name ?? ""}
+            loading="lazy"
+            className="my-2 max-h-[420px] max-w-full cursor-zoom-in rounded-lg border border-[var(--line)] object-contain"
+            onClick={() => live.current.onImageClick?.(hit.id)}
+          />
+        );
       },
       code({ className, children, node }) {
         const lang = /language-(\w+)/.exec(className ?? "")?.[1];
@@ -72,7 +93,12 @@ export const Markdown = memo(function Markdown({ text, sources = [], streaming, 
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={components}
-        urlTransform={(url) => (url.startsWith("cite:") ? url : /^(https?:|mailto:)/i.test(url) ? url : "")}
+        urlTransform={(url, key) => {
+          if (url.startsWith("cite:")) return url;
+          // 图片地址原样交给渲染器,由它对应到关联的图片记录(不会被当作网络地址加载)
+          if (key === "src") return /^(https?:|data:|javascript:)/i.test(url) ? "" : url;
+          return /^(https?:|mailto:)/i.test(url) ? url : "";
+        }}
       >
         {content}
       </ReactMarkdown>

@@ -43,6 +43,10 @@ export interface Item {
   tags: string[];
   entities: string[];
   visionText: string | null;
+  /** 本机 OCR 识别出的图中文字(图片) */
+  ocrText: string | null;
+  /** 是否由文档内嵌/引用自动导入的图片 */
+  embedded: boolean;
   metaModel: string | null;
   promptVersion: number | null;
   chunkCount: number;
@@ -57,11 +61,44 @@ export interface Chunk {
   embedModel: string | null;
   /** 所在页码(PDF) */
   page: number | null;
+  /** 该切片里出现的图片 */
+  images: ImageRef[];
+}
+
+/** 切片/来源关联的图片 */
+export interface ImageRef {
+  id: number;
+  attachmentPath: string | null;
+  name: string | null;
+}
+
+/** 文档引用的一张图片 */
+export interface LinkedImage {
+  childId: number;
+  /** 正文里的引用写法 */
+  anchor: string;
+  seq: number;
+  originalName: string | null;
+  attachmentPath: string | null;
+  ocrText: string | null;
+  visionDesc: string | null;
+}
+
+/** 引用某张图片的文档 */
+export interface ParentRef {
+  id: number;
+  kind: ItemKind;
+  title: string | null;
+  originalName: string | null;
 }
 
 export interface ItemDetail {
   item: Item;
   chunks: Chunk[];
+  /** 文档引用的图片(按出现顺序) */
+  images: LinkedImage[];
+  /** 图片被哪些文档引用 */
+  parents: ParentRef[];
 }
 
 export interface ItemFilter {
@@ -211,6 +248,10 @@ export interface Source {
   createdAt: number;
   attachmentPath: string | null;
   score: number;
+  /** 该切片里出现的图片(文档插图) */
+  images: ImageRef[];
+  /** 图片命中时的来源文档,如「来自《A》」 */
+  via: string | null;
 }
 
 export interface Session {
@@ -255,4 +296,6 @@ export interface CaptureResult {
   /** 被跳过内容的汇总行(按原因合并) */
   skipped: string[];
   skippedCount: number;
+  /** created 中由文档引用/内嵌自动导入并关联的图片数 */
+  linkedImages: number;
 }

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// 当前最新的数据库版本
-pub const LATEST_VERSION: i64 = 4;
+pub const LATEST_VERSION: i64 = 5;
 
 /// 只读连接池大小
 const READ_POOL_SIZE: usize = 4;
@@ -133,6 +133,31 @@ const MIGRATIONS: &[&str] = &[
     // v4:记录来源路径(文件夹导入时为「文件夹名/相对路径」)
     r#"
     ALTER TABLE items ADD COLUMN source_path TEXT;
+    "#,
+    // v5:图文关联。item_links 为记录间的多对多关系(relation: image=文档引用图片,merged_from=归并来源),
+    // anchor 为引用处在原文中的写法(如 md 的相对路径);chunk_images 记录哪个切片里出现了哪张图;
+    // embedded=1 表示图片由文档内嵌/引用自动导入(最后一个引用它的文档被删除时一并清理);
+    // item_meta 拆分出本机 OCR 文字与视觉模型描述(vision_text 保留作兼容与展示)
+    r#"
+    ALTER TABLE items ADD COLUMN embedded INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE item_meta ADD COLUMN ocr_text TEXT;
+    ALTER TABLE item_meta ADD COLUMN vision_desc TEXT;
+    CREATE TABLE item_links(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        child_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        relation TEXT NOT NULL DEFAULT 'image',
+        anchor TEXT NOT NULL DEFAULT '',
+        seq INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(parent_id, relation, seq)
+    );
+    CREATE INDEX idx_links_child ON item_links(child_id);
+    CREATE TABLE chunk_images(
+        chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+        image_item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        PRIMARY KEY(chunk_id, image_item_id)
+    );
+    CREATE INDEX idx_chunk_images_img ON chunk_images(image_item_id);
     "#,
 ];
 

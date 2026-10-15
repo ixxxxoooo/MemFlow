@@ -7,11 +7,13 @@ import { useKb } from "../../lib/kbStore";
 import { overlayOpen } from "../../lib/overlay";
 import { api } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
+import { uniqueImages } from "../../lib/docImages";
 import { fmtDate, fmtDuration } from "../../lib/format";
 import { STAGE_TEXT, useChat } from "../../lib/chatStore";
 import { useApp } from "../../lib/store";
 import type { Source } from "../../lib/types";
 import { CloseIcon, FolderIcon, HistoryIcon, PlusIcon, SendIcon, SparkleIcon, StopIcon, TrashIcon } from "../components/icons";
+import { ImageThumbs } from "../components/ImageThumbs";
 import { KbMentionPopup, KbScopeButton } from "../components/KbScopePicker";
 import { BrandIcon } from "../components/BrandIcon";
 import { Markdown } from "../components/Markdown";
@@ -176,9 +178,14 @@ export function ChatView() {
                         <button key={s.n} onClick={() => onCite(s)} className="flex max-w-[200px] items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 hover:border-[var(--accent)] hover:text-[var(--accent)]">
                           <span className="font-semibold text-[var(--accent)]">{s.n}</span>
                           <span className="truncate">{s.title ?? (s.kind === "image" ? "图片" : "记录")}{s.page ? ` p.${s.page}` : ""}</span>
+                          {s.via && <span className="shrink-0 text-[10px] text-[var(--fg-faint)]">· {s.via}</span>}
                           {kbs.length > 1 && s.kbName && <span className="shrink-0 text-[10px] text-[var(--fg-faint)]">· {s.kbName}</span>}
                         </button>
                       ))}
+                      {/* 引用片段里的插图(旧消息没有该字段) */}
+                      <div className="basis-full">
+                        <ImageThumbs images={uniqueImages(m.sources)} size={56} />
+                      </div>
                     </div>
                   )}
                 </div>

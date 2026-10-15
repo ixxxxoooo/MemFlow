@@ -69,3 +69,18 @@ for o in offs:
     out += b"%010d 00000 n \n" % o
 out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
 open("text_en.pdf", "wb").write(bytes(out))
+
+
+# ---- 图片 OCR 夹具(图文关联测试用):白底黑字的小图 ----
+def text_png(name, lines, size=(900, 260)):
+    img = Image.new("RGB", size, (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    y = 40
+    for line in lines:
+        d.text((40, y), line, font=font(56), fill=(0, 0, 0))
+        y += 90
+    img.save(name, "PNG")
+
+
+text_png("ocr_budget.png", ["设备采购预算", "总计八万八千元"])
+text_png("ocr_route.png", ["星河科技供应商", "交付周期三周"])
