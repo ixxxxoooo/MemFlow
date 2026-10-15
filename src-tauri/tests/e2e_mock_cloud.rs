@@ -202,7 +202,7 @@ async fn 云端模式_流式问答忽略推理内容() {
 
     let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
     let ev = events.clone();
-    chat::ask(&core, None, "老王说预算怎么样", &move |e| {
+    chat::ask(&core, None, "老王说预算怎么样", None, &move |e| {
         ev.lock().unwrap().push(e)
     })
     .await

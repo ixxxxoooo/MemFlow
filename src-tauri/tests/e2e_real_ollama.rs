@@ -83,9 +83,13 @@ async fn 真机冒烟_录入问答流程图重刷溯源() {
     // 2. 问答 + 溯源
     let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
     let ev = events.clone();
-    chat::ask(&core, None, "老王的会议安排是什么?", &move |e| {
-        ev.lock().unwrap().push(e)
-    })
+    chat::ask(
+        &core,
+        None,
+        "老王的会议安排是什么?",
+        None,
+        &move |e| ev.lock().unwrap().push(e),
+    )
     .await
     .expect("问答失败");
     let evs = events.lock().unwrap().clone();
@@ -131,6 +135,7 @@ async fn 真机冒烟_录入问答流程图重刷溯源() {
         &core,
         Some(session_id),
         "请把刚才这条记录整理成 mermaid 流程图",
+        None,
         &move |e| ev2.lock().unwrap().push(e),
     )
     .await

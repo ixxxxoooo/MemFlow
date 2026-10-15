@@ -180,7 +180,7 @@ async fn 完整链路_录入到问答() {
     // 2) 问答:命中老王那条,角标 [9] 被移除
     let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
     let ev = events.clone();
-    chat::ask(&core, None, "老王说预算怎么样", &move |e| {
+    chat::ask(&core, None, "老王说预算怎么样", None, &move |e| {
         ev.lock().unwrap().push(e)
     })
     .await
@@ -231,7 +231,7 @@ async fn 无相关资料时拒答且不调用模型() {
     *mock.last_system.lock().unwrap() = String::new();
     let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
     let ev = events.clone();
-    chat::ask(&core, None, "量子计算机的原理", &move |e| {
+    chat::ask(&core, None, "量子计算机的原理", None, &move |e| {
         ev.lock().unwrap().push(e)
     })
     .await

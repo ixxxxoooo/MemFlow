@@ -53,6 +53,8 @@ pub struct AppStatus {
     pub vector_count: usize,
     /// 是否已配置云端 API Key(密钥本身不会返回前端)
     pub has_api_key: bool,
+    /// 已配置密钥的云端档案标识(含 default)
+    pub keyed_profiles: Vec<String>,
 }
 
 /// 记录详情
@@ -126,6 +128,10 @@ pub async fn app_status(core: S<'_>) -> Result<AppStatus> {
         data_dir: core.paths.root.to_string_lossy().into_owned(),
         vector_count: core.vindex.len(),
         has_api_key: core.has_api_key(),
+        keyed_profiles: std::iter::once(crate::secrets::DEFAULT_PROFILE.to_string())
+            .chain(settings.llm_profiles.iter().map(|p| p.id.clone()))
+            .filter(|id| core.key_present(id))
+            .collect(),
         settings,
     })
 }
@@ -256,13 +262,23 @@ pub async fn download_rerank_model(
     Ok(())
 }
 
-/// 保存云端 API Key 到系统钥匙串(传空串表示清除)
+/// 保存云端 API Key 到系统钥匙串(传空串表示清除;profile_id 为空表示默认云端模型)
 #[tauri::command]
-pub fn set_llm_api_key(core: S<'_>, key: String) -> Result<()> {
+pub fn set_llm_api_key(core: S<'_>, key: String, profile_id: Option<String>) -> Result<()> {
     if key.len() > 400 {
         return Err(AppError::Invalid("API Key 过长".into()));
     }
-    core.set_api_key(&key)?;
+    let pid = profile_id.unwrap_or_else(|| crate::secrets::DEFAULT_PROFILE.to_string());
+    let known = pid == crate::secrets::DEFAULT_PROFILE
+        || core.settings().llm_profiles.iter().any(|p| p.id == pid)
+        // 刚新增的档案可能尚未保存设置;只要标识合法也允许先写入密钥
+        || (!pid.is_empty()
+            && pid.len() <= 40
+            && pid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    if !known {
+        return Err(AppError::Invalid("云端模型档案标识不合法".into()));
+    }
+    core.set_key_for(&pid, &key)?;
     queue::emit_status(&core);
     Ok(())
 }
@@ -274,6 +290,7 @@ pub async fn test_llm_connection(
     base_url: String,
     model: String,
     key: Option<String>,
+    profile_id: Option<String>,
 ) -> Result<String> {
     let base = base_url.trim();
     if !(base.starts_with("http://") || base.starts_with("https://")) {
@@ -286,7 +303,13 @@ pub async fn test_llm_connection(
     }
     let key = key
         .filter(|k| !k.trim().is_empty())
-        .or_else(|| core.api_key())
+        .or_else(|| {
+            core.key_for(
+                profile_id
+                    .as_deref()
+                    .unwrap_or(crate::secrets::DEFAULT_PROFILE),
+            )
+        })
         .unwrap_or_default();
     core.cloud_client(base, &key).ping(model.trim()).await
 }
@@ -411,13 +434,20 @@ pub async fn chat_ask(
     core: S<'_>,
     session_id: Option<i64>,
     question: String,
+    model_ref: Option<String>,
     on_event: Channel<ChatEvent>,
 ) -> Result<()> {
     let core = core.inner().clone();
-    chat::ask(&core, session_id, &question, &|ev| {
+    chat::ask(&core, session_id, &question, model_ref.as_deref(), &|ev| {
         let _ = on_event.send(ev);
     })
     .await
+}
+
+/// 对话可选模型(本地 Ollama 文本模型 + 已配置密钥的云端模型)
+#[tauri::command]
+pub async fn list_chat_models(core: S<'_>) -> Result<Vec<crate::chat_models::ChatModelOption>> {
+    Ok(crate::chat_models::list_chat_models(&core).await)
 }
 
 /// 停止当前问答

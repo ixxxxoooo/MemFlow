@@ -128,6 +128,8 @@ pub struct SessionView {
     pub id: i64,
     pub title: String,
     pub updated_at: i64,
+    /// 该会话最近一次使用的对话模型引用
+    pub model_ref: Option<String>,
 }
 
 /// 对话消息
@@ -139,6 +141,31 @@ pub struct MessageView {
     pub content: String,
     pub sources: Option<serde_json::Value>,
     pub created_at: i64,
+    /// 回答所用模型名(仅助手消息)
+    pub model: Option<String>,
+    /// 回答所用来源:ollama / openai_compat
+    pub provider: Option<String>,
+    /// 回答总耗时(毫秒)
+    pub elapsed_ms: Option<i64>,
+    /// 首字耗时(毫秒)
+    pub first_token_ms: Option<i64>,
+}
+
+/// 一次回答的模型与耗时信息
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerMeta {
+    /// 模型名,如 qwen2.5:7b、deepseek-chat
+    pub model: String,
+    /// 来源:ollama / openai_compat
+    pub provider: String,
+    /// 云端档案的预设标识(用于挑选图标),本地为空
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// 总耗时(毫秒)
+    pub elapsed_ms: i64,
+    /// 首字耗时(毫秒);未产生文字时为空
+    pub first_token_ms: Option<i64>,
 }
 
 /// 记录查询的公共 SELECT 片段
@@ -481,13 +508,14 @@ pub fn create_session(c: &Connection, title: &str) -> Result<i64> {
 /// 列出会话(最近更新在前)
 pub fn list_sessions(c: &Connection) -> Result<Vec<SessionView>> {
     let mut stmt = c.prepare(
-        "SELECT id, title, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT 100",
+        "SELECT id, title, updated_at, model_ref FROM chat_sessions ORDER BY updated_at DESC LIMIT 100",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(SessionView {
             id: r.get(0)?,
             title: r.get(1)?,
             updated_at: r.get(2)?,
+            model_ref: r.get(3)?,
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -495,7 +523,7 @@ pub fn list_sessions(c: &Connection) -> Result<Vec<SessionView>> {
 
 /// 读取会话消息
 pub fn list_messages(c: &Connection, session_id: i64) -> Result<Vec<MessageView>> {
-    let mut stmt = c.prepare_cached("SELECT id, role, content, sources, created_at FROM chat_messages WHERE session_id = ?1 ORDER BY id")?;
+    let mut stmt = c.prepare_cached("SELECT id, role, content, sources, created_at, model, provider, elapsed_ms, first_token_ms FROM chat_messages WHERE session_id = ?1 ORDER BY id")?;
     let rows = stmt.query_map([session_id], |r| {
         let sources: Option<String> = r.get(3)?;
         Ok(MessageView {
@@ -504,9 +532,41 @@ pub fn list_messages(c: &Connection, session_id: i64) -> Result<Vec<MessageView>
             content: r.get(2)?,
             sources: sources.and_then(|s| serde_json::from_str(&s).ok()),
             created_at: r.get(4)?,
+            model: r.get(5)?,
+            provider: r.get(6)?,
+            elapsed_ms: r.get(7)?,
+            first_token_ms: r.get(8)?,
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// 追加一条助手回答,同时记录所用模型与耗时
+///
+/// 参数: c 连接;session_id 会话;content 回答;sources 资料;meta 模型与耗时
+/// 返回: 消息 id
+pub fn add_answer(
+    c: &Connection,
+    session_id: i64,
+    content: &str,
+    sources: Option<&serde_json::Value>,
+    meta: &AnswerMeta,
+) -> Result<i64> {
+    let id = add_message(c, session_id, "assistant", content, sources)?;
+    c.execute(
+        "UPDATE chat_messages SET model=?2, provider=?3, elapsed_ms=?4, first_token_ms=?5 WHERE id=?1",
+        params![id, meta.model, meta.provider, meta.elapsed_ms, meta.first_token_ms],
+    )?;
+    Ok(id)
+}
+
+/// 记住会话最近使用的模型
+pub fn set_session_model(c: &Connection, session_id: i64, model_ref: &str) -> Result<()> {
+    c.execute(
+        "UPDATE chat_sessions SET model_ref = ?2 WHERE id = ?1",
+        params![session_id, model_ref],
+    )?;
+    Ok(())
 }
 
 /// 追加消息并刷新会话时间

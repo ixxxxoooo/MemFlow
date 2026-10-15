@@ -11,7 +11,7 @@
 | 临时文件、数据库备份 | `.../MemFlow/tmp/`、`.../MemFlow/backups/` |
 | 重排序模型 | `.../MemFlow/models/rerank/<模型名>/` |
 | 运行日志(按天滚动,保留 7 天) | `~/Library/Logs/MemFlow/memflow.log.*` |
-| 云端 API Key | macOS 钥匙串,服务名 `com.memflow.app`(不入库、不进备份) |
+| 云端 API Key | macOS 钥匙串,服务名 `com.ixxxxoooo.memflow`(与 bundle 标识一致,旧版本的条目首次使用时自动迁移)(不入库、不进备份) |
 | Ollama 模型 | `~/.ollama/models`(由 Ollama 管理) |
 
 向量以 BLOB 存在 `chunks.embedding`,启动时按嵌入模型加载进内存做余弦检索;重建索引不需要重新向量化。

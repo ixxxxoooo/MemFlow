@@ -12,6 +12,7 @@ use crate::secrets;
 use crate::settings::Settings;
 use crate::vector::VectorIndex;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -151,7 +152,9 @@ pub struct Core {
     /// 云端模型专用 HTTP 客户端(遵循系统代理)
     cloud_http: reqwest::Client,
     /// API Key 缓存:外层 None 表示尚未读取过钥匙串
-    api_key: Mutex<Option<Option<String>>>,
+    api_keys: Mutex<HashMap<String, Option<String>>>,
+    /// 密钥是否存在的缓存(只查存在性,不读内容,不触发钥匙串授权)
+    key_presence: Mutex<HashMap<String, bool>>,
     sink: Arc<dyn EventSink>,
     /// 唤醒后台 Worker
     pub wake: Notify,
@@ -195,7 +198,8 @@ impl Core {
             vindex: VectorIndex::new(),
             http: build_http(),
             cloud_http: build_cloud_http(),
-            api_key: Mutex::new(None),
+            api_keys: Mutex::new(HashMap::new()),
+            key_presence: Mutex::new(HashMap::new()),
             settings: RwLock::new(settings.clone()),
             sink,
             wake: Notify::new(),
@@ -250,34 +254,66 @@ impl Core {
         OllamaClient::new(self.http.clone(), &self.settings().ollama_url)
     }
 
-    /// 当前云端 API Key(首次访问时从钥匙串读取并缓存)
-    pub fn api_key(&self) -> Option<String> {
-        let mut g = self.api_key.lock().unwrap();
-        if g.is_none() {
-            *g = Some(secrets::load_api_key());
-        }
-        g.clone().flatten()
-    }
-
-    /// 是否已配置 API Key
-    pub fn has_api_key(&self) -> bool {
-        self.api_key().is_some()
-    }
-
-    /// 保存 API Key 到钥匙串并更新缓存;传入空串表示清除
+    /// 某云端档案的 API Key(首次访问时从钥匙串读取并缓存)
     ///
-    /// 参数: key 密钥
-    pub fn set_api_key(&self, key: &str) -> Result<()> {
-        secrets::save_api_key(key)?;
-        self.set_api_key_memory(key);
+    /// 参数: profile 档案标识,default 为默认云端模型
+    pub fn key_for(&self, profile: &str) -> Option<String> {
+        let mut g = self.api_keys.lock().unwrap();
+        g.entry(profile.to_string())
+            .or_insert_with(|| secrets::load_api_key(profile))
+            .clone()
+    }
+
+    /// 某档案是否已保存密钥。只查存在性、不读取内容,因此不会弹出钥匙串授权窗口;
+    /// 界面状态与模型列表应使用它,真正调用云端时才用 `key_for` 读取密钥。
+    pub fn key_present(&self, profile: &str) -> bool {
+        if let Some(v) = self.api_keys.lock().unwrap().get(profile) {
+            return v.is_some();
+        }
+        let mut g = self.key_presence.lock().unwrap();
+        *g.entry(profile.to_string())
+            .or_insert_with(|| secrets::key_exists(profile))
+    }
+
+    /// 默认云端模型的 API Key
+    pub fn api_key(&self) -> Option<String> {
+        self.key_for(secrets::DEFAULT_PROFILE)
+    }
+
+    /// 是否已配置默认云端模型的 API Key
+    pub fn has_api_key(&self) -> bool {
+        self.key_present(secrets::DEFAULT_PROFILE)
+    }
+
+    /// 保存某档案的 API Key 到钥匙串并更新缓存;传入空串表示清除
+    ///
+    /// 参数: profile 档案标识;key 密钥
+    pub fn set_key_for(&self, profile: &str, key: &str) -> Result<()> {
+        secrets::save_api_key(profile, key)?;
+        self.set_key_memory(profile, key);
+        self.key_presence
+            .lock()
+            .unwrap()
+            .insert(profile.to_string(), !key.trim().is_empty());
         Ok(())
+    }
+
+    /// 保存默认云端模型的 API Key
+    pub fn set_api_key(&self, key: &str) -> Result<()> {
+        self.set_key_for(secrets::DEFAULT_PROFILE, key)
     }
 
     /// 仅更新内存缓存,不触碰钥匙串(测试使用)
     #[doc(hidden)]
-    pub fn set_api_key_memory(&self, key: &str) {
+    pub fn set_key_memory(&self, profile: &str, key: &str) {
         let v = (!key.trim().is_empty()).then(|| key.trim().to_string());
-        *self.api_key.lock().unwrap() = Some(v);
+        self.api_keys.lock().unwrap().insert(profile.to_string(), v);
+    }
+
+    /// 仅更新默认档案的内存缓存(测试使用)
+    #[doc(hidden)]
+    pub fn set_api_key_memory(&self, key: &str) {
+        self.set_key_memory(secrets::DEFAULT_PROFILE, key);
     }
 
     /// 云端/下载用 HTTP 客户端(遵循系统代理,无总超时)

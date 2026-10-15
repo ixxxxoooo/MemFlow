@@ -46,6 +46,8 @@ pub struct Settings {
     pub import_concurrency: u32,
     /// PDF 解析模式:auto = 文本层 + 扫描页自动 OCR(推荐);vision = 视觉模型逐页转 Markdown(慢,表格/版面更准)
     pub pdf_parse_mode: String,
+    /// 额外的云端模型档案(对话时可自由切换;默认云端配置不在此列)
+    pub llm_profiles: Vec<LlmProfile>,
     /// 是否启用本地重排序(模型未下载时自动跳过)
     pub rerank_enabled: bool,
     /// 重排序模型标识(见 `rerank::SPECS`)
@@ -58,6 +60,25 @@ pub struct Settings {
 pub const PDF_MODE_AUTO: &str = "auto";
 /// PDF 解析模式:视觉模型逐页解析
 pub const PDF_MODE_VISION: &str = "vision";
+
+/// 云端模型档案(API Key 单独存放在钥匙串,不在此结构中)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmProfile {
+    /// 稳定标识(字母数字与 -_,不可为 default)
+    pub id: String,
+    /// 显示名称
+    pub name: String,
+    /// 预设标识(用于挑选图标,如 deepseek / custom)
+    pub preset: String,
+    /// 接口根地址
+    pub base_url: String,
+    /// 模型名
+    pub model: String,
+}
+
+/// 档案数量上限
+pub const MAX_PROFILES: usize = 12;
 
 /// 文本模型来源:本地 Ollama
 pub const PROVIDER_OLLAMA: &str = "ollama";
@@ -86,6 +107,7 @@ impl Default for Settings {
             model_registry: "https://registry.ollama.ai".into(),
             import_concurrency: 0,
             pdf_parse_mode: PDF_MODE_AUTO.into(),
+            llm_profiles: Vec::new(),
             rerank_enabled: true,
             rerank_model: crate::rerank::DEFAULT_MODEL.into(),
             hf_mirror: "https://hf-mirror.com".into(),
@@ -154,6 +176,33 @@ impl Settings {
             return Err(AppError::Invalid(
                 "PDF 解析模式只能是 auto 或 vision".into(),
             ));
+        }
+        if self.llm_profiles.len() > MAX_PROFILES {
+            return Err(AppError::Invalid(format!(
+                "云端模型档案最多 {MAX_PROFILES} 个"
+            )));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for p in &self.llm_profiles {
+            let id_ok = !p.id.is_empty()
+                && p.id.len() <= 40
+                && p.id != crate::secrets::DEFAULT_PROFILE
+                && p.id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !id_ok || !seen.insert(p.id.clone()) {
+                return Err(AppError::Invalid("云端模型档案标识不合法或重复".into()));
+            }
+            if p.model.trim().is_empty() || p.name.trim().is_empty() {
+                return Err(AppError::Invalid(
+                    "云端模型档案的名称与模型名不能为空".into(),
+                ));
+            }
+            if !(p.base_url.starts_with("http://") || p.base_url.starts_with("https://")) {
+                return Err(AppError::Invalid(
+                    "云端接口地址必须以 http:// 或 https:// 开头".into(),
+                ));
+            }
         }
         if crate::rerank::spec_of(&self.rerank_model).is_none() {
             return Err(AppError::Invalid("未知的重排序模型".into()));
@@ -258,6 +307,44 @@ mod tests {
             ..Settings::default()
         };
         assert!(bad_mode.validate().is_err());
+    }
+
+    #[test]
+    fn 云端档案校验() {
+        let p = |id: &str| LlmProfile {
+            id: id.into(),
+            name: "Kimi".into(),
+            preset: "moonshot".into(),
+            base_url: "https://api.moonshot.cn/v1".into(),
+            model: "moonshot-v1-8k".into(),
+        };
+        let ok = Settings {
+            llm_profiles: vec![p("kimi1"), p("zhipu_2")],
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+        for bad in ["", "default", "a/b", "带中文", &"x".repeat(41)] {
+            let s = Settings {
+                llm_profiles: vec![p(bad)],
+                ..Settings::default()
+            };
+            assert!(s.validate().is_err(), "{bad} 应被拒绝");
+        }
+        let dup = Settings {
+            llm_profiles: vec![p("a"), p("a")],
+            ..Settings::default()
+        };
+        assert!(dup.validate().is_err());
+        let mut bad_url = p("b");
+        bad_url.base_url = "ftp://x".into();
+        let s = Settings {
+            llm_profiles: vec![bad_url],
+            ..Settings::default()
+        };
+        assert!(s.validate().is_err());
+        // 旧版设置没有档案字段时默认为空
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.llm_profiles.is_empty());
     }
 
     #[test]

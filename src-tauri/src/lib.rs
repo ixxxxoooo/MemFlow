@@ -2,6 +2,7 @@
 //! MemFlow:本地 AI 第二大脑(Tauri 2 + Rust 后端)。
 
 pub mod chat;
+pub mod chat_models;
 pub mod chunker;
 pub mod commands;
 pub mod core;
@@ -114,6 +115,7 @@ pub fn run() {
             commands::retry_failed,
             commands::cancel_item,
             commands::chat_ask,
+            commands::list_chat_models,
             commands::chat_cancel,
             commands::list_sessions,
             commands::get_session_messages,

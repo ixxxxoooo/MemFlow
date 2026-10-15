@@ -6,11 +6,12 @@
 //! 2. 系统提示词要求仅依据资料并用 [n] 标注来源
 //! 3. 回答完成后校验角标,移除资料中不存在的编号
 
+use crate::chat_models::{self, ResolvedModel};
 use crate::core::{CancelToken, Core};
 use crate::error::{AppError, Result};
 use crate::ollama::{strip_code_fence, ChatMessage};
 use crate::prompts;
-use crate::repo;
+use crate::repo::{self, AnswerMeta};
 use crate::retrieval::{self, Hit, SearchOptions};
 use regex::Regex;
 use serde::Serialize;
@@ -46,6 +47,8 @@ pub enum ChatEvent {
         message_id: i64,
         answer: String,
         stopped: bool,
+        /// 回答所用模型与耗时;未调用模型(无资料拒答)时为空
+        meta: Option<AnswerMeta>,
     },
 }
 
@@ -201,7 +204,12 @@ fn history_messages(msgs: &[repo::MessageView]) -> Vec<ChatMessage> {
 }
 
 /// 改写追问为独立检索问句,失败则回退原问题
-async fn rewrite_query(core: &Core, history: &[ChatMessage], question: &str) -> String {
+async fn rewrite_query(
+    core: &Core,
+    model: &ResolvedModel,
+    history: &[ChatMessage],
+    question: &str,
+) -> String {
     let hist_text = history
         .iter()
         .map(|m| {
@@ -214,9 +222,9 @@ async fn rewrite_query(core: &Core, history: &[ChatMessage], question: &str) -> 
         .collect::<Vec<_>>()
         .join("\n");
     let msgs = prompts::rewrite_messages(&hist_text, question);
-    match core
-        .llm()
-        .chat(&core.text_model(), &msgs, &core.gen_opts(0.0), None)
+    match model
+        .client
+        .chat(&model.model, &msgs, &core.gen_opts(0.0), None)
         .await
     {
         Ok(t) => {
@@ -236,14 +244,17 @@ async fn rewrite_query(core: &Core, history: &[ChatMessage], question: &str) -> 
 
 /// 执行一次问答
 ///
-/// 参数: core 核心;session_id 会话(None 则新建);question 问题;emit 事件回调
+/// 参数: core 核心;session_id 会话(None 则新建);question 问题;model_ref 对话模型引用
+/// (None 使用设置里的默认模型);emit 事件回调
 /// 返回: 完成返回 Ok;LLM 不可用等错误通过 Err 返回(调用方负责展示)
 pub async fn ask(
     core: &Arc<Core>,
     session_id: Option<i64>,
     question: &str,
+    model_ref: Option<&str>,
     emit: &(dyn Fn(ChatEvent) + Send + Sync),
 ) -> Result<()> {
+    let started = std::time::Instant::now();
     let q = question.trim();
     if q.is_empty() {
         return Err(AppError::Invalid("问题不能为空".into()));
@@ -258,6 +269,8 @@ pub async fn ask(
         old.cancel();
     }
     let settings = core.settings();
+    // 模型引用不合法或缺少密钥时尽早报错,不污染会话
+    let model = chat_models::resolve(core, model_ref)?;
 
     // 会话与历史
     let sid = match session_id {
@@ -270,13 +283,17 @@ pub async fn ask(
     let prior = core.db.with_read(|c| repo::list_messages(c, sid))?;
     core.db
         .with(|c| repo::add_message(c, sid, "user", q, None).map(|_| ()))?;
+    core.db
+        .with(|c| repo::set_session_model(c, sid, &model.ref_id))?;
     emit(ChatEvent::Session { session_id: sid });
     let history = history_messages(&prior);
 
     // 检索
-    core.prepare_text_model().await;
+    if model.is_local() {
+        core.prepare_chat_model(&model.model).await;
+    }
     let search_q = if settings.query_rewrite && !history.is_empty() {
-        rewrite_query(core, &history, q).await
+        rewrite_query(core, &model, &history, q).await
     } else {
         q.to_string()
     };
@@ -309,6 +326,7 @@ pub async fn ask(
             message_id: id,
             answer: NO_RESULT_ANSWER.into(),
             stopped: false,
+            meta: None,
         });
         return Ok(());
     }
@@ -327,15 +345,19 @@ pub async fn ask(
     messages.extend(history);
     messages.push(ChatMessage::new("user", q));
 
-    let llm = core.llm();
     let mut partial = String::new();
-    let result = llm
+    let mut first_token_ms: Option<i64> = None;
+    let result = model
+        .client
         .chat_stream(
-            &core.text_model(),
+            &model.model,
             &messages,
             &core.gen_opts(0.3),
             &token.0,
             |t| {
+                if first_token_ms.is_none() && !t.is_empty() {
+                    first_token_ms = Some(started.elapsed().as_millis() as i64);
+                }
                 partial.push_str(t);
                 emit(ChatEvent::Token {
                     text: t.to_string(),
@@ -344,16 +366,25 @@ pub async fn ask(
         )
         .await;
     let sources_json = serde_json::to_value(&sources)?;
+    let make_meta = |first: Option<i64>| AnswerMeta {
+        model: model.model.clone(),
+        provider: model.provider.clone(),
+        preset: model.preset.clone(),
+        elapsed_ms: started.elapsed().as_millis() as i64,
+        first_token_ms: first,
+    };
     match result {
         Ok(full) => {
             let (final_text, _) = sanitize_citations(&full, sources.len());
-            let id = core.db.with(|c| {
-                repo::add_message(c, sid, "assistant", &final_text, Some(&sources_json))
-            })?;
+            let meta = make_meta(first_token_ms);
+            let id = core
+                .db
+                .with(|c| repo::add_answer(c, sid, &final_text, Some(&sources_json), &meta))?;
             emit(ChatEvent::Done {
                 message_id: id,
                 answer: final_text,
                 stopped: false,
+                meta: Some(meta),
             });
             Ok(())
         }
@@ -364,13 +395,15 @@ pub async fn ask(
             } else {
                 format!("{}\n\n(已停止生成)", partial.trim_end())
             };
+            let meta = make_meta(first_token_ms);
             let id = core
                 .db
-                .with(|c| repo::add_message(c, sid, "assistant", &text, Some(&sources_json)))?;
+                .with(|c| repo::add_answer(c, sid, &text, Some(&sources_json), &meta))?;
             emit(ChatEvent::Done {
                 message_id: id,
                 answer: text,
                 stopped: true,
+                meta: Some(meta),
             });
             Ok(())
         }
@@ -470,6 +503,10 @@ mod tests {
             content: "说明\n```mermaid\nflowchart TD\nA-->B\n```".into(),
             sources: None,
             created_at: 0,
+            model: None,
+            provider: None,
+            elapsed_ms: None,
+            first_token_ms: None,
         }];
         let h = history_messages(&msgs);
         assert!(h[0].content.contains("[已生成流程图]"));
