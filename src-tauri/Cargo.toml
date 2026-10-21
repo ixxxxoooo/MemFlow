@@ -32,7 +32,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 jieba-rs = "0.7"
 pdf-extract = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 thiserror = "2"
