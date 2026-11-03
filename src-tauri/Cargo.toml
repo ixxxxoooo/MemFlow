@@ -42,7 +42,7 @@ encoding_rs = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-base64 = "0.22"
+base64 = "0.23"
 # 大规模向量检索时并行计算相似度
 rayon = "1"
 # 本地 ONNX 重排序(bge-reranker)。模型文件由 model_fetch 走镜像下载,这里不启用 hf-hub
